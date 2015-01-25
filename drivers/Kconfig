@@ -14,9 +14,11 @@ choice
         depends on ARCH_HAS_SCHEDULER_WATCHDOG
 endchoice
 
-config GREYBUS
+menuconfig GREYBUS
     bool "Greybus"
 
+if GREYBUS
 source drivers/greybus/Kconfig
+endif
 
 endmenu
