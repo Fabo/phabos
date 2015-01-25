@@ -28,3 +28,4 @@ obj-y += lowio.o
 obj-y += scm.o
 obj-y += tsb.o
 obj-y += gpio.o
+obj-y += unipro.o
