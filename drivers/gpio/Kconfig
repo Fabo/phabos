@@ -3,5 +3,5 @@
 #
 # Provided under the three clause BSD license found in the LICENSE file.
 
-subdirs-$(CONFIG_GREYBUS) += greybus
-subdirs-$(CONFIG_GPIO) += gpio
+config TCA6408
+    bool "TCA6408 support"
