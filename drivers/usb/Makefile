@@ -3,7 +3,4 @@
 #
 # Provided under the three clause BSD license found in the LICENSE file.
 
-subdirs-$(CONFIG_GREYBUS) += greybus
-subdirs-$(CONFIG_GPIO) += gpio
-subdirs-$(CONFIG_I2C) += i2c
-subdirs-$(CONFIG_USB) += usb
+subdirs-$(CONFIG_USB_DWC2) += dwc2
