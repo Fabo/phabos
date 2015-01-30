@@ -3,5 +3,10 @@
 #
 # Provided under the three clause BSD license found in the LICENSE file.
 
-config TCA6408
+menuconfig TCA6408
     bool "TCA6408 support"
+
+if TCA6408
+config TCA6408_TESTAPP
+    bool "TCA6408 test app"
+endif
