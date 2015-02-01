@@ -38,6 +38,7 @@ obj-$(CONFIG_USB_HOST) += dwc_otg_hcd_queue.o
 
 obj-$(CONFIG_USB_DEVICE) += dwc_otg_pcd.o
 obj-$(CONFIG_USB_DEVICE) += dwc_otg_pcd_intr.o
+obj-$(CONFIG_USB_DEVICE) += dwc_usbdev.o
 
 CFLAGS += -DDWC_PHABOS
 ifeq ($(CONFIG_USB_DWC2_DEBUG),y)
