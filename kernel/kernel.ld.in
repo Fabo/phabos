@@ -21,6 +21,12 @@ SECTIONS
         _esyscall = .;
     } DATA_STORAGE
 
+    .driver : {
+        _driver = .;
+        KEEP(*(.driver))
+        _edriver = .;
+    } DATA_STORAGE
+
     .heap : {
         _sheap = .;
     } > SRAM
