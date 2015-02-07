@@ -29,7 +29,10 @@
 #include "scm.h"
 #include "chip.h"
 
+#include <config.h>
+#include <asm/gpio.h>
 #include <asm/hwio.h>
+#include <phabos/device.h>
 
 #define UART_RBR_THR_DLL            (UART_BASE + 0x0)
 #define UART_IER_DLH                (UART_BASE + 0x4)
@@ -46,7 +49,21 @@
 #define UART_FCR_IIR_IID1_RFIFOR    (1 << 1)
 #define UART_FCR_IIR_IID1_XFIFOR    (1 << 2)
 
-void tsb_uart_init(void)
+struct bridge {
+    const char name[16];
+    void (*init)(void);
+};
+
+extern struct device_driver dw_driver;
+
+static void apb2_init(void)
+{
+#ifdef CONFIG_I2C_DW
+    device_register(&dw_driver);
+#endif
+}
+
+static void early_uart_init(void)
 {
     tsb_set_pinshare(TSB_PIN_UART_RXTX | TSB_PIN_UART_CTSRTS);
 
@@ -67,7 +84,17 @@ void tsb_uart_init(void)
     }
 }
 
+static struct bridge bridge = {
+#if defined(CONFIG_TSB_APB2)
+    .name = "APB2",
+    .init = apb2_init,
+#else
+    #error "TSB: Bad bridge configuration"
+#endif
+};
+
 void machine_init(void)
 {
-    tsb_uart_init();
+    early_uart_init();
+    bridge.init();
 }
