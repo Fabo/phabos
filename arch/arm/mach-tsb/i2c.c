@@ -29,19 +29,21 @@
 #include "scm.h"
 #include "chip.h"
 
+#include <errno.h>
 #include <asm/irq.h>
 #include <asm/tsb-irq.h>
 #include <phabos/utils.h>
 #include <phabos/i2c.h>
+#include <phabos/i2c/dw.h>
+#include <phabos/driver.h>
 
-/**
- * Initialise an I2C device
- */
-void dw_mach_initialize(struct i2c_dev *dev)
+static int dw_probe(struct driver *driver)
 {
-    assert(dev);
-    assert(dev->ops);
-    assert(dev->ops->irq);
+    struct dw_dev *dw = dw_init();
+    if (!dw)
+        return -ENODEV;
+
+    assert(dw->adapter.irq);
 
     /* enable I2C pins */
     tsb_clr_pinshare(TSB_PIN_SDIO);
@@ -55,19 +57,37 @@ void dw_mach_initialize(struct i2c_dev *dev)
     tsb_reset(TSB_RST_I2CS);
 
     /* Attach Interrupt Handler */
-    irq_attach(TSB_IRQ_I2C, dev->ops->irq, dev);
+    irq_attach(TSB_IRQ_I2C, dw->adapter.irq, dw);
 
     /* Enable Interrupt Handler */
     irq_enable_line(TSB_IRQ_I2C);
 
-    dev->base = I2C_BASE;
+    dw->base = I2C_BASE;
+
+    driver->dev = &dw->adapter.dev;
+
+    return 0;
 }
 
-/**
- * Uninitialise an I2C device
- */
-void dw_mach_destroy(void)
+static int dw_remove(struct driver *driver)
 {
+    RET_IF_FAIL(driver, -EINVAL);
+    RET_IF_FAIL(driver->dev, -EINVAL);
+
+    struct device_driver *dev = driver->dev;
+    struct i2c_adapter *adapter = containerof(dev, struct i2c_adapter, dev);
+    struct dw_dev *dw = containerof(adapter, struct dw_dev, adapter);
+
     irq_disable_line(TSB_IRQ_I2C);
     irq_detach(TSB_IRQ_I2C);
+
+    dw_exit(dw);
+
+    return 0;
 }
+
+struct driver dw_driver = {
+    .name = "tsb-i2c",
+    .probe = dw_probe,
+    .remove = dw_remove,
+};
