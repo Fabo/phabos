@@ -29,6 +29,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 #include <asm/hwio.h>
 #include <asm/irq.h>
@@ -38,6 +39,8 @@
 #include <phabos/sleep.h>
 #include <phabos/mutex.h>
 #include <phabos/semaphore.h>
+#include <phabos/utils.h>
+
 #include <phabos/i2c.h>
 #include <phabos/watchdog.h>
 
@@ -47,27 +50,28 @@
 #undef lldbg
 #define lldbg(x...)
 
-static struct i2c_dev   g_dev;        /* Generic Nuttx I2C device */
-static struct i2c_msg   *g_msgs;      /* Generic messages array */
-static struct mutex     g_mutex;      /* Only one thread can access at a time */
-static struct semaphore g_wait;       /* Wait for state machine completion */
-static struct watchdog  g_timeout;    /* Watchdog to timeout when bus hung */
+struct dw_dev {
+    struct i2c_dev   dev;        /* Generic Nuttx I2C device */
+    struct i2c_msg   *msgs;      /* Generic messages array */
+    struct mutex     mutex;      /* Only one thread can access at a time */
+    struct semaphore wait;       /* Wait for state machine completion */
+    struct watchdog  timeout;    /* Watchdog to timeout when bus hung */
 
-static unsigned int     g_tx_index;
-static unsigned int     g_tx_length;
-static uint8_t          *g_tx_buffer;
+    unsigned int     tx_index;
+    unsigned int     tx_length;
+    uint8_t          *tx_buffer;
 
-static unsigned int     g_rx_index;
-static unsigned int     g_rx_length;
-static uint8_t          *g_rx_buffer;
+    unsigned int     rx_index;
+    unsigned int     rx_length;
+    uint8_t          *rx_buffer;
 
-static unsigned int     g_msgs_count;
-static int              g_cmd_err;
-static int              g_msg_err;
-static unsigned int     g_status;
-static uint32_t         g_abort_source;
-static unsigned int     g_rx_outstanding;
-
+    unsigned int     msgs_count;
+    int              cmd_err;
+    int              msg_err;
+    unsigned int     status;
+    uint32_t         abort_source;
+    unsigned int     rx_outstanding;
+};
 
 /* I2C controller configuration */
 #define DW_I2C_CONFIG (DW_I2C_CON_RESTART_EN | \
@@ -91,34 +95,36 @@ static unsigned int     g_rx_outstanding;
 void dw_mach_initialize(struct i2c_dev *dev);
 void dw_mach_destroy(void);
 
-static uint32_t dw_read(int offset)
+static uint32_t dw_read(struct dw_dev *dev, int offset)
 {
-    return read32(g_dev.base + offset);
+    assert(dev);
+    return read32(dev->dev.base + offset);
 }
 
-static void dw_write(int offset, uint32_t b)
+static void dw_write(struct dw_dev *dev, int offset, uint32_t b)
 {
-    write32(g_dev.base + offset, b);
+    assert(dev);
+    write32(dev->dev.base + offset, b);
 }
 
-static void tsb_i2c_clear_int(void)
+static void tsb_i2c_clear_int(struct dw_dev *dev)
 {
-    dw_read(DW_I2C_CLR_INTR);
+    dw_read(dev, DW_I2C_CLR_INTR);
 }
 
-static void tsb_i2c_disable_int(void)
+static void tsb_i2c_disable_int(struct dw_dev *dev)
 {
-    dw_write(DW_I2C_INTR_MASK, 0);
+    dw_write(dev, DW_I2C_INTR_MASK, 0);
 }
 
-static void dw_set_enable(int enable)
+static void dw_set_enable(struct dw_dev *dev, int enable)
 {
     int i;
 
     for (i = 0; i < 50; i++) {
-        dw_write(DW_I2C_ENABLE, enable);
+        dw_write(dev, DW_I2C_ENABLE, enable);
 
-        if ((dw_read(DW_I2C_ENABLE_STATUS) & 0x1) == enable)
+        if ((dw_read(dev, DW_I2C_ENABLE_STATUS) & 0x1) == enable)
             return;
 
         usleep(25);
@@ -128,47 +134,47 @@ static void dw_set_enable(int enable)
 }
 
 /* Enable the controller */
-static void tsb_i2c_enable(void)
+static void tsb_i2c_enable(struct dw_dev *dev)
 {
-    dw_set_enable(1);
+    dw_set_enable(dev, 1);
 }
 
 /* Disable the controller */
-static void tsb_i2c_disable(void)
+static void tsb_i2c_disable(struct dw_dev *dev)
 {
-    dw_set_enable(0);
+    dw_set_enable(dev, 0);
 
-    tsb_i2c_disable_int();
-    tsb_i2c_clear_int();
+    tsb_i2c_disable_int(dev);
+    tsb_i2c_clear_int(dev);
 }
 
 /**
  * Initialize the TSB I2 controller
  */
-static void tsb_i2c_init(void)
+static void tsb_i2c_init(struct dw_dev *dev)
 {
     /* Disable the adapter */
-    tsb_i2c_disable();
+    tsb_i2c_disable(dev);
 
     /* Set timings for Standard and Fast Speed mode */
-    dw_write(DW_I2C_SS_SCL_HCNT, 28);
-    dw_write(DW_I2C_SS_SCL_LCNT, 52);
-    dw_write(DW_I2C_FS_SCL_HCNT, 47);
-    dw_write(DW_I2C_FS_SCL_LCNT, 65);
+    dw_write(dev, DW_I2C_SS_SCL_HCNT, 28);
+    dw_write(dev, DW_I2C_SS_SCL_LCNT, 52);
+    dw_write(dev, DW_I2C_FS_SCL_HCNT, 47);
+    dw_write(dev, DW_I2C_FS_SCL_LCNT, 65);
 
     /* Configure Tx/Rx FIFO threshold levels */
-    dw_write(DW_I2C_TX_TL, DW_I2C_TX_FIFO_DEPTH - 1);
-    dw_write(DW_I2C_RX_TL, 0);
+    dw_write(dev, DW_I2C_TX_TL, DW_I2C_TX_FIFO_DEPTH - 1);
+    dw_write(dev, DW_I2C_RX_TL, 0);
 
     /* configure the i2c master */
-    dw_write(DW_I2C_CON, DW_I2C_CONFIG);
+    dw_write(dev, DW_I2C_CON, DW_I2C_CONFIG);
 }
 
-static int tsb_i2c_wait_bus_ready(void)
+static int tsb_i2c_wait_bus_ready(struct dw_dev *dev)
 {
     int timeout = TIMEOUT;
 
-    while (dw_read(DW_I2C_STATUS) & DW_I2C_STATUS_ACTIVITY) {
+    while (dw_read(dev, DW_I2C_STATUS) & DW_I2C_STATUS_ACTIVITY) {
         if (timeout <= 0) {
             lldbg("timeout\n");
             return -ETIMEDOUT;
@@ -180,81 +186,81 @@ static int tsb_i2c_wait_bus_ready(void)
     return 0;
 }
 
-static void tsb_i2c_start_transfer(void)
+static void tsb_i2c_start_transfer(struct dw_dev *dev)
 {
     lldbg("\n");
 
     /* Disable the adapter */
-    tsb_i2c_disable();
+    tsb_i2c_disable(dev);
 
     /* write target address */
-    dw_write(DW_I2C_TAR, g_msgs[g_tx_index].addr);
+    dw_write(dev, DW_I2C_TAR, dev->msgs[dev->tx_index].addr);
 
     /* Disable the interrupts */
-    tsb_i2c_disable_int();
+    tsb_i2c_disable_int(dev);
 
     /* Enable the adapter */
-    tsb_i2c_enable();
+    tsb_i2c_enable(dev);
 
     /* Clear interrupts */
-    tsb_i2c_clear_int();
+    tsb_i2c_clear_int(dev);
 
     /* Enable interrupts */
-    dw_write(DW_I2C_INTR_MASK, DW_I2C_INTR_DEFAULT_MASK);
+    dw_write(dev, DW_I2C_INTR_MASK, DW_I2C_INTR_DEFAULT_MASK);
 }
 
 /**
  * Internal function that handles the read or write transfer
  * It is called from the IRQ handler.
  */
-static void tsb_i2c_transfer_msg(void)
+static void tsb_i2c_transfer_msg(struct dw_dev *dev)
 {
     uint32_t intr_mask;
-    uint32_t addr = g_msgs[g_tx_index].addr;
-    uint8_t *buffer = g_tx_buffer;
-    uint32_t length = g_tx_length;
+    uint32_t addr = dev->msgs[dev->tx_index].addr;
+    uint8_t *buffer = dev->tx_buffer;
+    uint32_t length = dev->tx_length;
 
     bool need_restart = false;
 
     int tx_avail;
     int rx_avail;
 
-    lldbg("tx_index %d\n", g_tx_index);
+    lldbg("tx_index %d\n", dev->tx_index);
 
     /* loop over the i2c message array */
-    for (; g_tx_index < g_msgs_count; g_tx_index++) {
+    for (; dev->tx_index < dev->msgs_count; dev->tx_index++) {
 
-        if (g_msgs[g_tx_index].addr != addr) {
+        if (dev->msgs[dev->tx_index].addr != addr) {
             lldbg("invalid target address\n");
-            g_msg_err = -EINVAL;
+            dev->msg_err = -EINVAL;
             break;
         }
 
-        if (g_msgs[g_tx_index].length == 0) {
+        if (dev->msgs[dev->tx_index].length == 0) {
             lldbg("invalid message length\n");
-            g_msg_err = -EINVAL;
+            dev->msg_err = -EINVAL;
             break;
         }
 
-        if (!(g_status & DW_I2C_STATUS_WRITE_IN_PROGRESS)) {
+        if (!(dev->status & DW_I2C_STATUS_WRITE_IN_PROGRESS)) {
             /* init a new msg transfer */
-            buffer = g_msgs[g_tx_index].buffer;
-            length = g_msgs[g_tx_index].length;
+            buffer = dev->msgs[dev->tx_index].buffer;
+            length = dev->msgs[dev->tx_index].length;
 
             /* force a restart between messages */
-            if (g_tx_index > 0)
+            if (dev->tx_index > 0)
                 need_restart = true;
         }
 
         /* Get the amount of free space in the internal buffer */
-        tx_avail = DW_I2C_TX_FIFO_DEPTH - dw_read(DW_I2C_TXFLR);
-        rx_avail = DW_I2C_RX_FIFO_DEPTH - dw_read(DW_I2C_RXFLR);
+        tx_avail = DW_I2C_TX_FIFO_DEPTH - dw_read(dev, DW_I2C_TXFLR);
+        rx_avail = DW_I2C_RX_FIFO_DEPTH - dw_read(dev, DW_I2C_RXFLR);
 
         /* loop until one of the fifo is full or buffer is consumed */
         while (length > 0 && tx_avail > 0 && rx_avail > 0) {
             uint32_t cmd = 0;
 
-            if (g_tx_index == g_msgs_count - 1 && length == 1) {
+            if (dev->tx_index == dev->msgs_count - 1 && length == 1) {
                 /* Last msg, issue a STOP */
                 cmd |= (1 << 9);
                 lldbg("STOP\n");
@@ -266,17 +272,17 @@ static void tsb_i2c_transfer_msg(void)
                 lldbg("RESTART\n");
             }
 
-            if (g_msgs[g_tx_index].flags & I2C_READ) {
-                if (rx_avail - g_rx_outstanding <= 0)
+            if (dev->msgs[dev->tx_index].flags & I2C_READ) {
+                if (rx_avail - dev->rx_outstanding <= 0)
                     break;
 
-                dw_write(DW_I2C_DATA_CMD, cmd | 1 << 8); /* READ */
+                dw_write(dev, DW_I2C_DATA_CMD, cmd | 1 << 8); /* READ */
                 lldbg("READ\n");
 
                 rx_avail--;
-                g_rx_outstanding++;
+                dev->rx_outstanding++;
             } else {
-                dw_write(DW_I2C_DATA_CMD, cmd | *buffer++);
+                dw_write(dev, DW_I2C_DATA_CMD, cmd | *buffer++);
                 lldbg("WRITE\n");
             }
 
@@ -284,74 +290,74 @@ static void tsb_i2c_transfer_msg(void)
             length--;
         }
 
-        g_tx_buffer = buffer;
-        g_tx_length = length;
+        dev->tx_buffer = buffer;
+        dev->tx_length = length;
 
         if (length > 0) {
-            g_status |= DW_I2C_STATUS_WRITE_IN_PROGRESS;
+            dev->status |= DW_I2C_STATUS_WRITE_IN_PROGRESS;
             break;
         } else {
-            g_status &= ~DW_I2C_STATUS_WRITE_IN_PROGRESS;
+            dev->status &= ~DW_I2C_STATUS_WRITE_IN_PROGRESS;
         }
     }
 
     intr_mask = DW_I2C_INTR_DEFAULT_MASK;
 
     /* No more data to write. Stop the TX IRQ */
-    if (g_tx_index == g_msgs_count)
+    if (dev->tx_index == dev->msgs_count)
         intr_mask &= ~DW_I2C_INTR_TX_EMPTY;
 
     /* In case of error, mask all the IRQs */
-    if (g_msg_err)
+    if (dev->msg_err)
         intr_mask = 0;
 
-    dw_write(DW_I2C_INTR_MASK, intr_mask);
+    dw_write(dev, DW_I2C_INTR_MASK, intr_mask);
 }
 
-static void tsb_dw_read(void)
+static void tsb_dw_read(struct dw_dev *dev)
 {
     int rx_valid;
 
-    lldbg("rx_index %d\n", g_rx_index);
+    lldbg("rx_index %d\n", dev->rx_index);
 
-    for (; g_rx_index < g_msgs_count; g_rx_index++) {
+    for (; dev->rx_index < dev->msgs_count; dev->rx_index++) {
         uint32_t len;
         uint8_t *buffer;
 
-        if (!(g_msgs[g_rx_index].flags & I2C_READ))
+        if (!(dev->msgs[dev->rx_index].flags & I2C_READ))
             continue;
 
-        if (!(g_status & DW_I2C_STATUS_READ_IN_PROGRESS)) {
-            len = g_msgs[g_rx_index].length;
-            buffer = g_msgs[g_rx_index].buffer;
+        if (!(dev->status & DW_I2C_STATUS_READ_IN_PROGRESS)) {
+            len = dev->msgs[dev->rx_index].length;
+            buffer = dev->msgs[dev->rx_index].buffer;
         } else {
-            len = g_rx_length;
-            buffer = g_rx_buffer;
+            len = dev->rx_length;
+            buffer = dev->rx_buffer;
         }
 
-        rx_valid = dw_read(DW_I2C_RXFLR);
+        rx_valid = dw_read(dev, DW_I2C_RXFLR);
 
         for (; len > 0 && rx_valid > 0; len--, rx_valid--) {
-            *buffer++ = dw_read(DW_I2C_DATA_CMD);
-            g_rx_outstanding--;
+            *buffer++ = dw_read(dev, DW_I2C_DATA_CMD);
+            dev->rx_outstanding--;
         }
 
         if (len > 0) {
             /* start the read process */
-            g_status |= DW_I2C_STATUS_READ_IN_PROGRESS;
-            g_rx_length = len;
-            g_rx_buffer = buffer;
+            dev->status |= DW_I2C_STATUS_READ_IN_PROGRESS;
+            dev->rx_length = len;
+            dev->rx_buffer = buffer;
 
             return;
         } else {
-            g_status &= ~DW_I2C_STATUS_READ_IN_PROGRESS;
+            dev->status &= ~DW_I2C_STATUS_READ_IN_PROGRESS;
         }
     }
 }
 
-static int tsb_i2c_handle_tx_abort(void)
+static int tsb_i2c_handle_tx_abort(struct dw_dev *dev)
 {
-    unsigned long abort_source = g_abort_source;
+    unsigned long abort_source = dev->abort_source;
 
     lldbg("%s: 0x%x\n", __func__, abort_source);
 
@@ -363,37 +369,38 @@ static int tsb_i2c_handle_tx_abort(void)
     if (abort_source & DW_I2C_TX_ARB_LOST)
         return -EAGAIN;
     else if (abort_source & DW_I2C_TX_ABRT_GCALL_READ)
-        return -EINVAL; /* wrong g_msgs[] data */
+        return -EINVAL; /* wrong dev->msgs[] data */
     else
         return -EIO;
 }
 
 /* Perform a sequence of I2C transfers */
-static int dw_transfer(struct i2c_dev *dev, struct i2c_msg *msg, size_t count)
+static int dw_transfer(struct i2c_dev *i2c_dev, struct i2c_msg *msg, size_t count)
 {
     int ret;
+    struct dw_dev *dev = containerof(i2c_dev, struct dw_dev, dev);
 
     lldbg("msgs: %d\n", count);
 
-    mutex_lock(&g_mutex);
+    mutex_lock(&dev->mutex);
     /**
      * FIXME This seems wrong to me to disable the IRQs when calling
      * watchdog_start, and especially when calling semaphore_lock
      */
 //    irq_disable();
 
-    g_msgs = msg;
-    g_msgs_count = count;
-    g_tx_index = 0;
-    g_rx_index = 0;
-    g_rx_outstanding = 0;
+    dev->msgs = msg;
+    dev->msgs_count = count;
+    dev->tx_index = 0;
+    dev->rx_index = 0;
+    dev->rx_outstanding = 0;
 
-    g_cmd_err = 0;
-    g_msg_err = 0;
-    g_status = DW_I2C_STATUS_IDLE;
-    g_abort_source = 0;
+    dev->cmd_err = 0;
+    dev->msg_err = 0;
+    dev->status = DW_I2C_STATUS_IDLE;
+    dev->abort_source = 0;
 
-    ret = tsb_i2c_wait_bus_ready();
+    ret = tsb_i2c_wait_bus_ready(dev);
     if (ret < 0)
         goto done;
 
@@ -401,41 +408,41 @@ static int dw_transfer(struct i2c_dev *dev, struct i2c_msg *msg, size_t count)
      * start a watchdog to timeout the transfer if
      * the bus is locked up...
      */
-    watchdog_start(&g_timeout, DW_I2C_TIMEOUT);
+    watchdog_start(&dev->timeout, DW_I2C_TIMEOUT);
 
     /* start the transfers */
-    tsb_i2c_start_transfer();
+    tsb_i2c_start_transfer(dev);
 
-    semaphore_lock(&g_wait);
+    semaphore_lock(&dev->wait);
 
-    watchdog_cancel(&g_timeout);
+    watchdog_cancel(&dev->timeout);
 
-    if (g_status == DW_I2C_STATUS_TIMEOUT) {
+    if (dev->status == DW_I2C_STATUS_TIMEOUT) {
         lldbg("controller timed out\n");
 
         /* Re-init the adapter */
-        tsb_i2c_init();
+        tsb_i2c_init(dev);
         ret = -ETIMEDOUT;
         goto done;
     }
 
-    tsb_i2c_disable();
+    tsb_i2c_disable(dev);
 
-    if (g_msg_err) {
-        ret = g_msg_err;
-        lldbg("error msg_err %x\n", g_msg_err);
+    if (dev->msg_err) {
+        ret = dev->msg_err;
+        lldbg("error msg_err %x\n", dev->msg_err);
         goto done;
     }
 
-    if (!g_cmd_err) {
+    if (!dev->cmd_err) {
         ret = 0;
         lldbg("no error %d\n", count);
         goto done;
     }
 
     /* Handle abort errors */
-    if (g_cmd_err == DW_I2C_ERR_TX_ABRT) {
-        ret = tsb_i2c_handle_tx_abort();
+    if (dev->cmd_err == DW_I2C_ERR_TX_ABRT) {
+        ret = tsb_i2c_handle_tx_abort(dev);
         goto done;
     }
 
@@ -445,38 +452,38 @@ static int dw_transfer(struct i2c_dev *dev, struct i2c_msg *msg, size_t count)
 
 done:
 //    irq_enable();
-    mutex_unlock(&g_mutex);
+    mutex_unlock(&dev->mutex);
 
     return ret;
 }
 
-static uint32_t tsb_dw_read_clear_intrbits(void)
+static uint32_t tsb_dw_read_clear_intrbits(struct dw_dev *dev)
 {
-    uint32_t stat = dw_read(DW_I2C_INTR_STAT);
+    uint32_t stat = dw_read(dev, DW_I2C_INTR_STAT);
 
     if (stat & DW_I2C_INTR_RX_UNDER)
-        dw_read(DW_I2C_CLR_RX_UNDER);
+        dw_read(dev, DW_I2C_CLR_RX_UNDER);
     if (stat & DW_I2C_INTR_RX_OVER)
-        dw_read(DW_I2C_CLR_RX_OVER);
+        dw_read(dev, DW_I2C_CLR_RX_OVER);
     if (stat & DW_I2C_INTR_TX_OVER)
-        dw_read(DW_I2C_CLR_TX_OVER);
+        dw_read(dev, DW_I2C_CLR_TX_OVER);
     if (stat & DW_I2C_INTR_RD_REQ)
-        dw_read(DW_I2C_CLR_RD_REQ);
+        dw_read(dev, DW_I2C_CLR_RD_REQ);
     if (stat & DW_I2C_INTR_TX_ABRT) {
         /* IC_TX_ABRT_SOURCE reg is cleared upon read, store it */
-        g_abort_source = dw_read(DW_I2C_TX_ABRT_SOURCE);
-        dw_read(DW_I2C_CLR_TX_ABRT);
+        dev->abort_source = dw_read(dev, DW_I2C_TX_ABRT_SOURCE);
+        dw_read(dev, DW_I2C_CLR_TX_ABRT);
     }
     if (stat & DW_I2C_INTR_RX_DONE)
-        dw_read(DW_I2C_CLR_RX_DONE);
+        dw_read(dev, DW_I2C_CLR_RX_DONE);
     if (stat & DW_I2C_INTR_ACTIVITY)
-        dw_read(DW_I2C_CLR_ACTIVITY);
+        dw_read(dev, DW_I2C_CLR_ACTIVITY);
     if (stat & DW_I2C_INTR_STOP_DET)
-        dw_read(DW_I2C_CLR_STOP_DET);
+        dw_read(dev, DW_I2C_CLR_STOP_DET);
     if (stat & DW_I2C_INTR_START_DET)
-        dw_read(DW_I2C_CLR_START_DET);
+        dw_read(dev, DW_I2C_CLR_START_DET);
     if (stat & DW_I2C_INTR_GEN_CALL)
-        dw_read(DW_I2C_CLR_GEN_CALL);
+        dw_read(dev, DW_I2C_CLR_GEN_CALL);
 
     return stat;
 }
@@ -485,39 +492,40 @@ static uint32_t tsb_dw_read_clear_intrbits(void)
 static void dw_interrupt(int irq, void *data)
 {
     uint32_t stat, enabled;
+    struct dw_dev *dev = containerof(data, struct dw_dev, dev);
 
-    enabled = dw_read(DW_I2C_ENABLE);
-    stat = dw_read(DW_I2C_RAW_INTR_STAT);
+    enabled = dw_read(dev, DW_I2C_ENABLE);
+    stat = dw_read(dev, DW_I2C_RAW_INTR_STAT);
 
     lldbg("enabled=0x%x stat=0x%x\n", enabled, stat);
 
     if (!enabled || !(stat & ~DW_I2C_INTR_ACTIVITY))
         return;
 
-    stat = tsb_dw_read_clear_intrbits();
+    stat = tsb_dw_read_clear_intrbits(dev);
 
     if (stat & DW_I2C_INTR_TX_ABRT) {
         lldbg("abort\n");
-        g_cmd_err |= DW_I2C_ERR_TX_ABRT;
-        g_status = DW_I2C_STATUS_IDLE;
+        dev->cmd_err |= DW_I2C_ERR_TX_ABRT;
+        dev->status = DW_I2C_STATUS_IDLE;
 
-        tsb_i2c_disable_int();
+        tsb_i2c_disable_int(dev);
         goto tx_aborted;
     }
 
     if (stat & DW_I2C_INTR_RX_FULL)
-        tsb_dw_read();
+        tsb_dw_read(dev);
 
     if (stat & DW_I2C_INTR_TX_EMPTY)
-        tsb_i2c_transfer_msg();
+        tsb_i2c_transfer_msg(dev);
 
 tx_aborted:
     if (stat & DW_I2C_INTR_TX_ABRT)
-        lldbg("aborted %x %x\n", stat, g_abort_source);
+        lldbg("aborted %x %x\n", stat, dev->abort_source);
 
-    if ((stat & (DW_I2C_INTR_TX_ABRT | DW_I2C_INTR_STOP_DET)) || g_msg_err) {
+    if ((stat & (DW_I2C_INTR_TX_ABRT | DW_I2C_INTR_STOP_DET)) || dev->msg_err) {
         lldbg("release sem\n");
-        semaphore_unlock(&g_wait);
+        semaphore_unlock(&dev->wait);
     }
 }
 
@@ -526,16 +534,18 @@ tx_aborted:
  */
 static void dw_timeout(struct watchdog *wd)
 {
+    struct dw_dev *dev = wd->user_priv;
+
     lldbg("\n");
 
     irq_disable();
 
-    if (g_status != DW_I2C_STATUS_IDLE)
+    if (dev->status != DW_I2C_STATUS_IDLE)
     {
         lldbg("finished\n");
         /* Mark the transfer as finished */
-        g_status = DW_I2C_STATUS_TIMEOUT;
-        semaphore_unlock(&g_wait);
+        dev->status = DW_I2C_STATUS_TIMEOUT;
+        semaphore_unlock(&dev->wait);
     }
 
     irq_enable();
@@ -545,33 +555,43 @@ struct i2c_ops dev_i2c_ops;
 
 struct i2c_dev *dw_init(struct device_driver *driver)
 {
-    mutex_init(&g_mutex);
-    semaphore_init(&g_wait, 0);
+    struct dw_dev *dev;
+
+    dev = malloc(sizeof(*dev));
+    if (!dev)
+        return NULL;
+
+    mutex_init(&dev->mutex);
+    semaphore_init(&dev->wait, 0);
 
     /* Allocate a watchdog timer */
-    watchdog_init(&g_timeout);
-    g_timeout.timeout = dw_timeout;
+    watchdog_init(&dev->timeout);
+    dev->timeout.timeout = dw_timeout;
+    dev->timeout.user_priv = dev;
 
     /* Install our operations */
-    g_dev.ops = &dev_i2c_ops;
+    dev->dev.ops = &dev_i2c_ops;
 
-    driver->priv = &g_dev;
+    driver->priv = &dev->dev;
 
-    return &g_dev;
+    return &dev->dev;
 }
 
 static int dw_open(struct i2c_dev *dev)
 {
     /* Initialize the I2C controller */
-    tsb_i2c_init();
+    tsb_i2c_init(containerof(dev, struct dw_dev, dev));
     return 0;
 }
 
 static void dw_close(struct i2c_dev *dev)
 {
+    struct dw_dev *device = containerof(dev, struct dw_dev, dev);
+
     lldbg("\n");
 
-    watchdog_delete(&g_timeout);
+    watchdog_delete(&device->timeout);
+    free(device);
 }
 
 struct i2c_ops dev_i2c_ops = {
