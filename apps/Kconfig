@@ -9,4 +9,8 @@ config LSDEV
     bool "lsdev"
     default n
 
+config FREE
+    bool "free"
+    default n
+
 endmenu
