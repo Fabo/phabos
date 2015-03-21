@@ -21,7 +21,6 @@
 #include <asm/irq.h>
 #include <asm/atomic.h>
 
-#define TASK_RUNNING                    (1 << 1)
 #define DEFAULT_STACK_SIZE              4096
 
 static struct list_head runqueue = LIST_INIT(runqueue);

@@ -14,6 +14,8 @@
 #include <phabos/list.h>
 #include <phabos/mutex.h>
 
+#define TASK_RUNNING                    (1 << 1)
+
 struct task {
     int id;
     uint16_t state;

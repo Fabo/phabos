@@ -5,12 +5,16 @@
 
 menu "Apps"
 
-config LSDEV
+config APP_LSDEV
     bool "lsdev"
     default n
 
-config FREE
+config APP_FREE
     bool "free"
+    default n
+
+config APP_PS
+    bool "ps"
     default n
 
 endmenu

@@ -3,5 +3,6 @@
 #
 # Provided under the three clause BSD license found in the LICENSE file.
 
-obj-y += lsdev.o
-obj-y += free.o
+obj-$(CONFIG_APP_LSDEV) += lsdev.o
+obj-$(CONFIG_APP_FREE) += free.o
+obj-$(CONFIG_APP_PS) += ps.o
