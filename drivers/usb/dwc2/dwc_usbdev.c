@@ -37,7 +37,7 @@
 
 #include <asm/irq.h>
 #include <lib/utils.h>
-#include <phabos/device.h>
+#include <phabos/driver.h>
 
 #include "nuttx-usb.h"
 #include "nuttx-usbdev.h"
