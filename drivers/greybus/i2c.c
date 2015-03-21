@@ -43,7 +43,7 @@
 #define I2C_M_RD                        0x0001
 
 /* TODO move it inside a struct */
-struct i2c_dev *i2c_dev;
+struct i2c_adapter *i2c_adapter;
 
 static uint8_t gb_i2c_protocol_version(struct gb_operation *operation)
 {
@@ -134,7 +134,7 @@ static uint8_t gb_i2c_protocol_transfer(struct gb_operation *operation)
         }
         msg[i].length = desc->size;
     }
-    ret = i2c_transfer(i2c_dev, msg, op_count);
+    ret = i2c_transfer(i2c_adapter, msg, op_count);
     free(msg);
     if (ret == -EIO)
       return GB_OP_NONEXISTENT;
@@ -151,7 +151,7 @@ err_free_msg:
 
 static int gb_i2c_init(unsigned int cport)
 {
-    i2c_dev = i2c_initialize(0);
+    i2c_adapter = i2c_adapter_get(0);
     return 0;
 }
 
