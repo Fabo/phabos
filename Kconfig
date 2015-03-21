@@ -13,3 +13,4 @@ source "arch/$ARCH/Kconfig"
 source kernel/Kconfig
 source drivers/Kconfig
 source scripts/Kconfig
+source apps/Kconfig
