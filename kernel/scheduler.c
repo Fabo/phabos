@@ -25,11 +25,17 @@
 #define DEFAULT_STACK_SIZE              4096
 
 static struct list_head runqueue = LIST_INIT(runqueue);
+static struct list_head all_tasks = LIST_INIT(all_tasks);
 struct task *current;
 bool need_resched;
 static bool kill_task;
 static atomic_t is_locked;
 static int next_task_id;
+
+struct list_head *sched_get_task_list(void)
+{
+    return &all_tasks;
+}
 
 static struct task *task_create(void)
 {
@@ -39,6 +45,9 @@ static struct task *task_create(void)
     RET_IF_FAIL(task, NULL);
 
     list_init(&task->list);
+    list_init(&task->all);
+
+    list_add(&all_tasks, &task->all);
 
     irq_disable();
     task->id = next_task_id++;
@@ -69,6 +78,7 @@ void task_cond_broadcast(struct task_cond* cond)
 static void task_destroy(struct task *task)
 {
     // assert
+    list_del(&task->all);
     if (task->allocated_stack)
         free(task->allocated_stack);
     free(task);

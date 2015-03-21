@@ -21,6 +21,7 @@ struct task {
     void *allocated_stack;
 
     struct list_head list;
+    struct list_head all;
 };
 
 struct task_cond {
@@ -75,6 +76,8 @@ struct task *task_get_running(void);
 
 void sched_lock(void);
 void sched_unlock(void);
+
+struct list_head *sched_get_task_list(void);
 
 void task_cond_wait(struct task_cond* cond, struct mutex *mutex);
 void task_cond_signal(struct task_cond* cond);
