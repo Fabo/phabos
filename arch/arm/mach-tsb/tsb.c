@@ -32,7 +32,7 @@
 #include <config.h>
 #include <asm/gpio.h>
 #include <asm/hwio.h>
-#include <phabos/device.h>
+#include <phabos/driver.h>
 
 #define UART_RBR_THR_DLL            (UART_BASE + 0x0)
 #define UART_IER_DLH                (UART_BASE + 0x4)
