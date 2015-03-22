@@ -56,7 +56,7 @@ int tca6408_main(int argc, char **argv)
     int level5, prev_level5, level5b;
     int level7, prev_level7;
 
-    tca6408_reset(TCA6408_U72_RST_GPIO, 0);
+    tca6408_reset(TCA6408_U72_RST_GPIO, 0); // FIXME will not compile
     printf("TCA6408 U72 got reset.\n\n");
 
     /* Test output functions */
