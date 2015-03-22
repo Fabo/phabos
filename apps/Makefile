@@ -6,3 +6,4 @@
 obj-$(CONFIG_APP_LSDEV) += lsdev.o
 obj-$(CONFIG_APP_FREE) += free.o
 obj-$(CONFIG_APP_PS) += ps.o
+obj-$(CONFIG_APP_I2C) += i2c.o

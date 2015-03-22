@@ -17,4 +17,9 @@ config APP_PS
     bool "ps"
     default n
 
+config APP_I2C
+    bool "i2c"
+    depends on I2C
+    default n
+
 endmenu
