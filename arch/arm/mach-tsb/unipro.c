@@ -34,6 +34,7 @@
 #include <asm/irq.h>
 #include <asm/tsb-irq.h>
 #include <phabos/utils.h>
+#include <phabos/driver.h>
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -544,3 +545,20 @@ int unipro_driver_register(struct unipro_driver *driver, unsigned int cportid) {
     lldbg("Registered driver %s on CP%u\n", cport->driver->name, cport->cportid);
     return 0;
 }
+
+static int tsb_unipro_probe(struct driver *driver)
+{
+    unipro_init();
+    return 0;
+}
+
+static int tsb_unipro_remove(struct driver *driver)
+{
+    return 0;
+}
+
+struct driver tsb_unipro_driver = {
+    .name = "tsb-unipro",
+    .probe = tsb_unipro_probe,
+    .remove = tsb_unipro_remove,
+};

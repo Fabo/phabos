@@ -42,4 +42,7 @@ if USB
 source drivers/usb/Kconfig
 endif
 
+menuconfig UNIPRO
+    bool "Unipro"
+
 endmenu

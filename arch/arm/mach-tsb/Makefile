@@ -28,6 +28,6 @@ obj-y += lowio.o
 obj-y += scm.o
 obj-y += tsb.o
 obj-y += gpio.o
-obj-y += unipro.o
+obj-$(CONFIG_UNIPRO) += unipro.o
 obj-$(CONFIG_I2C_DW) += i2c.o
 obj-$(CONFIG_TCA6408) += tca6408.o
