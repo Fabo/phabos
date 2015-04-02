@@ -22,4 +22,9 @@ config APP_I2C
     depends on I2C
     default n
 
+config APP_UNIPRO
+    bool "unipro"
+    depends on UNIPRO
+    default n
+
 endmenu
