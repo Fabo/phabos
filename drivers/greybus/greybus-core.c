@@ -31,8 +31,8 @@
 #include <phabos/greybus.h>
 #include <phabos/scheduler.h>
 #include <phabos/time.h>
+#include <phabos/unipro.h>
 
-#include <asm/unipro.h>
 #include <asm/atomic.h>
 #include <asm/spinlock.h>
 

@@ -28,7 +28,7 @@
  * Author: Fabien Parent <fparent@baylibre.com>
  */
 
-#include <asm/unipro.h>
+#include <phabos/unipro.h>
 #include <phabos/greybus.h>
 
 static struct unipro_driver greybus_driver = {

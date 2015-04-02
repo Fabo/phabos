@@ -30,11 +30,11 @@
  */
 
 #include <asm/hwio.h>
-#include <asm/unipro.h>
 #include <asm/irq.h>
 #include <asm/tsb-irq.h>
 #include <phabos/utils.h>
 #include <phabos/driver.h>
+#include <phabos/unipro.h>
 
 #include <stdint.h>
 #include <stdlib.h>
