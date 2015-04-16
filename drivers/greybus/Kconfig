@@ -26,6 +26,7 @@
 
 config GREYBUS_GPIO
     bool "GPIO PHY"
+    depends on UNIFIED_GPIO
     default y
 
 config GREYBUS_I2C

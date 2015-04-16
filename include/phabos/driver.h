@@ -49,5 +49,7 @@ int device_register(struct device_driver *driver);
 int device_unregister(struct device_driver *dev);
 struct list_head *device_get_list(void);
 
+#define __driver__ __attribute__((section(".driver")))
+
 #endif /* __DRIVER_H__ */
 

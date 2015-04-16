@@ -28,7 +28,8 @@
  * Author: Fabien Parent <fparent@baylibre.com>
  */
 
-#include <asm/gpio.h>
+#include <phabos/gpio.h>
+#include <phabos/gpio/unified.h>
 #include <phabos/greybus.h>
 #include "gpio-gb.h"
 

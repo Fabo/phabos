@@ -6,6 +6,10 @@
 * use newlibc usleep
 * unify low api
 * every api that deal with times/delays shoud use struct timeval
+* dev fs infrastructure
+* dev phabfs
+* add debugfs capabilities
+* fix greybus GPIO phy
 * port greybus drivers to the device driver core api
 * port unipro driver to the device driver core api
 * port everything to spinlock API/avoid overuse of intr disabling
@@ -13,7 +17,3 @@
 * create i2c shell command
 * add option to lsdev to list busses
 * make tca6408 a real i2c_dev that will register on an i2c_bus
-* fix greybus GPIO phy
-* dev fs infrastructure
-* dev phabfs
-* add debugfs capabilities

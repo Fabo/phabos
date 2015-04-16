@@ -10,3 +10,7 @@ if TCA6408
 config TCA6408_TESTAPP
     bool "TCA6408 test app"
 endif
+
+config UNIFIED_GPIO
+    bool "Unified GPIO controller"
+    default n

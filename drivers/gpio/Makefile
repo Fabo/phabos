@@ -6,3 +6,4 @@
 obj-$(CONFIG_GPIO) += core.o
 obj-$(CONFIG_TCA6408) += tca6408.o
 obj-$(CONFIG_TCA6408_TESTAPP) += tca6408-testapp.o
+obj-$(CONFIG_UNIFIED_GPIO) += unified.o
