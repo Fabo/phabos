@@ -8,25 +8,32 @@
 #ifndef __I2C_H__
 #define __I2C_H__
 
-#define I2C_READ    (1 << 1)
-
 #include <assert.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <errno.h>
 
-struct i2c_dev;
+#include <phabos/driver.h>
+#include <lib/assert.h>
+#include <lib/list.h>
+
+#define DEVICE_CLASS_I2C "i2c"
+#define I2C_READ    (1 << 1)
+
+struct i2c_adapter;
 struct i2c_msg;
 
-struct i2c_ops {
-    struct i2c_dev* (*init)(int port);
-    void (*destroy)(struct i2c_dev *dev);
-    int (*transfer)(struct i2c_dev *dev, struct i2c_msg *msg, size_t count);
-    void (*irq)(int irq, void *context);
+struct i2c_dev {
+    struct device_driver dev;
 };
 
-struct i2c_dev {
-    unsigned long base;
-    struct i2c_ops *ops;
+struct i2c_adapter {
+    struct device_driver dev;
+    struct list_head list;
+
+    int (*transfer)(struct i2c_adapter *adapter,
+                    struct i2c_msg *msg, size_t count);
+    void (*irq)(int irq, void *context);
 };
 
 struct i2c_msg {
@@ -36,27 +43,36 @@ struct i2c_msg {
     unsigned long flags;
 };
 
-static inline void i2c_destroy(struct i2c_dev *dev)
+int i2c_adapter_register(struct i2c_adapter *adapter);
+int i2c_adapter_unregister(struct i2c_adapter *adapter);
+
+struct i2c_adapter *i2c_adapter_get(unsigned int id);
+
+static inline int i2c_open(struct i2c_adapter *adapter)
 {
-    assert(dev);
-    assert(dev->ops);
-    assert(dev->ops->destroy);
-    dev->ops->destroy(dev);
+    int retval;
+
+    RET_IF_FAIL(adapter, -EINVAL);
+    RET_IF_FAIL(adapter->dev.ops.open, -EINVAL);
+
+    retval = adapter->dev.ops.open(&adapter->dev);
+    return retval;
 }
 
-static inline struct i2c_dev *i2c_initialize(int port)
+static inline void i2c_close(struct i2c_adapter *adapter)
 {
-    extern struct i2c_ops dev_i2c_ops;
-    return dev_i2c_ops.init(0); // FIXME
+    RET_IF_FAIL(adapter,);
+    RET_IF_FAIL(adapter->dev.ops.close,);
+
+    adapter->dev.ops.close(&adapter->dev);
 }
 
-static inline int i2c_transfer(struct i2c_dev *dev, struct i2c_msg *msg,
+static inline int i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msg,
                                size_t count)
 {
-    assert(dev);
-    assert(dev->ops);
-    assert(dev->ops->transfer);
-    return dev->ops->transfer(dev, msg, count);
+    assert(adapter);
+    assert(adapter->transfer);
+    return adapter->transfer(adapter, msg, count);
 }
 
 #endif /* __I2C_H__ */

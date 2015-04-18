@@ -3,4 +3,5 @@
 #
 # Provided under the three clause BSD license found in the LICENSE file.
 
+obj-$(CONFIG_I2C) += adapter.o
 obj-$(CONFIG_I2C_DW) += dw.o
