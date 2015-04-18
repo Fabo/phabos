@@ -543,14 +543,8 @@ static void dw_timeout(struct watchdog *wd)
 
 struct i2c_ops dev_i2c_ops;
 
-static struct i2c_dev *dw_init(int port)
+struct i2c_dev *dw_init(struct device_driver *driver)
 {
-    lldbg("I2C port %d\n", port);
-
-    /* Only one I2C port on TSB */
-    if (port > 0)
-        return NULL;
-
     mutex_init(&g_mutex);
     semaphore_init(&g_wait, 0);
 
@@ -561,26 +555,28 @@ static struct i2c_dev *dw_init(int port)
     /* Install our operations */
     g_dev.ops = &dev_i2c_ops;
 
-    dw_mach_initialize(&g_dev);
-
-    /* Initialize the I2C controller */
-    tsb_i2c_init();
+    driver->priv = &g_dev;
 
     return &g_dev;
 }
 
-static void dw_destroy(struct i2c_dev *dev)
+static int dw_open(struct i2c_dev *dev)
+{
+    /* Initialize the I2C controller */
+    tsb_i2c_init();
+    return 0;
+}
+
+static void dw_close(struct i2c_dev *dev)
 {
     lldbg("\n");
 
     watchdog_delete(&g_timeout);
-
-    dw_mach_destroy();
 }
 
 struct i2c_ops dev_i2c_ops = {
-    .init           = dw_init,
-    .destroy        = dw_destroy,
+    .open           = dw_open,
+    .close          = dw_close,
     .transfer       = dw_transfer,
     .irq            = dw_interrupt,
 };
