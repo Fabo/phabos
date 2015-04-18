@@ -39,6 +39,9 @@ choice
 
     config MACH_STELLARIS
         bool "TI Stellaris"
+
+    config MACH_STM32
+        bool "STM32"
 endchoice
 
 if MACH_TSB
