@@ -483,13 +483,14 @@ dwc_tasklet_t *DWC_TASK_ALLOC(char *name, dwc_tasklet_callback_t cb, void *data)
 
 void DWC_TASK_FREE(dwc_tasklet_t *task)
 {
-    // FIXME free task memory
-    // FIXME remove task from runqueue
+    task_kill(task->task);
     free(task);
 }
 
 void DWC_TASK_SCHEDULE(dwc_tasklet_t *task)
 {
+    // FIXME: make it atomic by disabling the interrupt to simulate interrupt
+    // context?
     task->task = task_run(task->cb, task->data, 0);
 }
 

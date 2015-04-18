@@ -36,11 +36,17 @@
 #include <errno.h>
 
 #include <asm/irq.h>
+#include <lib/utils.h>
+#include <phabos/device.h>
 
+#include "nuttx-usb.h"
+#include "nuttx-usbdev.h"
 #include "dwc_os.h"
 #include "dwc_otg_driver.h"
 #include "dwc_otg_pcd_if.h"
 #include "dwc_otg_pcd.h"
+
+#define TSB_IRQ_HSIC 0
 
 #define SNPSID_MASK 0xFFFFF000
 #define SNPSID_OTG2 0x4F542000
@@ -151,14 +157,14 @@ struct usbdev_req *dwc_allocreq(struct usbdev_ep *ep)
     }
 #endif
 
-    privreq = (struct dwc_req *)kmm_malloc(sizeof(struct dwc_req_s));
+    privreq = malloc(sizeof(*privreq));
     if (!privreq) {
         DWC_ERROR("%s, Fail to allocate request for ep%d\n", __func__,
                   USB_EPNO(ep->eplog));
         return NULL;
     }
 
-    memset(privreq, 0, sizeof(struct dwc_req_s));
+    memset(privreq, 0, sizeof(struct dwc_req));
     return &privreq->req;
 }
 
@@ -173,7 +179,7 @@ void dwc_freereq(struct usbdev_ep *ep, struct usbdev_req *req)
     }
 #endif
 
-    kmm_free(privreq);
+    free(privreq);
 }
 
 /*
@@ -201,7 +207,7 @@ int dwc_submit(struct usbdev_ep *usb_ep, struct usbdev_req *req)
     zero = (req->flags & USBDEV_REQFLAGS_NULLPKT) ? 1 : 0;
     retval = dwc_otg_pcd_ep_queue(pcd, usb_ep, req->buf, dma_addr,
                                   req->len, zero, req,
-                                  up_interrupt_context()? 1 : 0);
+                                  irq_get_active_line() >= 0);
     if (retval) {
         DWC_ERROR("%s, Can't queue request: ep = %p, req = %p\n",
                   __func__, usb_ep, req);
@@ -264,7 +270,7 @@ int dwc_stall(struct usbdev_ep *ep, bool resume)
     return retval;
 }
 
-static const struct usbdev_epops_s g_epops = {
+static const struct usbdev_epops g_epops = {
     .configure = dwc_configure,
     .disable = dwc_disable,
     .allocreq = dwc_allocreq,
@@ -398,7 +404,7 @@ int dwc_usbpullup(struct usbdev *dev, bool enable)
     return 0;
 }
 
-static const struct usbdev_ops_s g_devops = {
+static const struct usbdev_ops g_devops = {
     .allocep = dwc_allocep,
     .freeep = dwc_freeep,
     .getframe = dwc_getframe,
@@ -412,7 +418,7 @@ static int _setup(dwc_otg_pcd_t * pcd, uint8_t * bytes)
     int ret = -DWC_E_NOT_SUPPORTED;
     struct dwc_usbdev *priv;
     dwc_otg_device_t *otg_dev = pcd->otg_dev;
-    priv = containerof(otg_dev, struct dwc_usbdev_s, dwc_otg_device);
+    priv = containerof(otg_dev, struct dwc_usbdev, dwc_otg_device);
 
     if (priv && priv->driver) {
         /*
@@ -470,7 +476,7 @@ static int _connect(dwc_otg_pcd_t * pcd, int speed)
     struct dwc_usbdev *priv;
 
     dwc_otg_device_t *otg_dev = pcd->otg_dev;
-    priv = containerof(otg_dev, struct dwc_usbdev_s, dwc_otg_device);
+    priv = containerof(otg_dev, struct dwc_usbdev, dwc_otg_device);
     priv->usbdev.speed = speed;
     return 0;
 }
@@ -480,7 +486,7 @@ static int _disconnect(dwc_otg_pcd_t * pcd)
     struct dwc_usbdev *priv;
 
     dwc_otg_device_t *otg_dev = pcd->otg_dev;
-    priv = containerof(otg_dev, struct dwc_usbdev_s, dwc_otg_device);
+    priv = containerof(otg_dev, struct dwc_usbdev, dwc_otg_device);
     CLASS_DISCONNECT(priv->driver, &priv->usbdev);
 
     return 0;
@@ -491,7 +497,7 @@ static int _resume(dwc_otg_pcd_t * pcd)
     struct dwc_usbdev *priv;
 
     dwc_otg_device_t *otg_dev = pcd->otg_dev;
-    priv = containerof(otg_dev, struct dwc_usbdev_s, dwc_otg_device);
+    priv = containerof(otg_dev, struct dwc_usbdev, dwc_otg_device);
     CLASS_RESUME(priv->driver, &priv->usbdev);
 
     return 0;
@@ -502,7 +508,7 @@ static int _suspend(dwc_otg_pcd_t * pcd)
     struct dwc_usbdev *priv;
 
     dwc_otg_device_t *otg_dev = pcd->otg_dev;
-    priv = containerof(otg_dev, struct dwc_usbdev_s, dwc_otg_device);
+    priv = containerof(otg_dev, struct dwc_usbdev, dwc_otg_device);
     CLASS_SUSPEND(priv->driver, &priv->usbdev);
 
     return 0;
@@ -535,7 +541,7 @@ static const struct dwc_otg_pcd_function_ops fops = {
     .reset = _reset,
 };
 
-int dwc_irq_handler(int irq, void *context)
+void dwc_irq_handler(int irq, void *context)
 {
     struct dwc_usbdev *priv = &g_usbdev;
     dwc_otg_pcd_t *pcd = priv->dwc_otg_device.pcd;
@@ -546,32 +552,21 @@ int dwc_irq_handler(int irq, void *context)
      */
     dwc_otg_handle_common_intr(dev);
     dwc_otg_pcd_handle_intr(pcd);
-
-    return 0;
 }
 
-int up_usbinitialize_core(struct dwc_usbdev *priv)
+static int up_usbinitialize_core(struct dwc_usbdev *priv, uint32_t reg_addr,
+                                 uint32_t reg_offset)
 {
     int retval = 0;
     dwc_otg_device_t *dwc_otg_device = &priv->dwc_otg_device;
 
     memset(dwc_otg_device, 0, sizeof(*dwc_otg_device));
-    dwc_otg_device->os_dep.reg_offset = 0xFFFFFFFF;
-
-    /*
-     * Enable the DWC_otg clocks
-     */
-    tsb_clk_enable(TSB_CLK_HSIC480);
-    tsb_clk_enable(TSB_CLK_HSICREF);
-    tsb_clk_enable(TSB_CLK_HSICBUS);
-    tsb_reset(TSB_RST_HSIC);
-    tsb_reset(TSB_RST_HSICPHY);
-    tsb_reset(TSB_RST_HSICPOR);
+    dwc_otg_device->os_dep.reg_offset = reg_offset;
 
     /*
      * Map the DWC_otg Core memory
      */
-    dwc_otg_device->os_dep.base = (void *)HSIC_BASE;
+    dwc_otg_device->os_dep.base = (void *) reg_addr;
     dwc_otg_device->core_if = dwc_otg_cil_init(dwc_otg_device->os_dep.base);
     if (!dwc_otg_device->core_if) {
         DWC_ERROR("CIL initialization failed!\n");
@@ -615,7 +610,7 @@ int up_usbinitialize_core(struct dwc_usbdev *priv)
      */
     DWC_DEBUGPL(DBG_CIL, "registering (common) handler for irq%d\n",
                 TSB_IRQ_HSIC);
-    if (irq_attach(TSB_IRQ_HSIC, dwc_irq_handler) != 0) {
+    if (irq_attach(TSB_IRQ_HSIC, dwc_irq_handler, NULL) != 0) {
         DWC_ERROR("Can't register HSIC IRQ\n");
         goto fail;
     } else {
@@ -643,7 +638,7 @@ int up_usbinitialize_core(struct dwc_usbdev *priv)
     return retval;
 }
 
-int up_usbinitialize_device(struct dwc_usbdev *priv)
+static int up_usbinitialize_device(struct dwc_usbdev *priv)
 {
     int epno;
     dwc_otg_device_t *otg_dev = &priv->dwc_otg_device;
@@ -697,94 +692,42 @@ int up_usbinitialize_device(struct dwc_usbdev *priv)
     return retval;
 }
 
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-void up_usbuninitialize(void);
-/****************************************************************************
- * Name: up_usbinitialize
- * Description:
- *   Initialize the USB driver
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-void up_usbinitialize(void)
-{
-    /*
-     * For now there is only one USB controller, but we will always refer to it
-     * using a pointer to make any future ports to multiple USB controllers
-     * easier.
-     */
+int dwc2_exit(struct device_driver *device);
 
-    struct dwc_usbdev *priv = &g_usbdev;
+int dwc2_init(struct device_driver *device, uint32_t reg_addr,
+              uint32_t reg_offset)
+{
+    device->priv = &g_usbdev;
 
     SET_DEBUG_LEVEL(DBG_ANY);
-    if (up_usbinitialize_core(priv))
+    if (up_usbinitialize_core(device->priv, reg_addr, reg_offset))
         goto fail;
-    if (up_usbinitialize_device(priv))
+    if (up_usbinitialize_device(device->priv))
         goto fail;
-    return;
+    return 0;
 
- fail:
-    up_usbuninitialize();
+fail:
+    dwc2_exit(device);
+    return -1;
 }
 
-/****************************************************************************
- * Name: up_usbuninitialize
- * Description:
- *   Initialize the USB driver
- * Input Parameters:
- *   None
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-void up_usbuninitialize(void)
+int dwc2_exit(struct device_driver *device)
 {
-    /*
-     * For now there is only one USB controller, but we will always refer to it
-     * using a pointer to make any future ports to multiple USB controllers
-     * easier.
-     */
-    struct dwc_usbdev *priv = &g_usbdev;
+    struct dwc_usbdev *priv = device->priv;
     dwc_otg_device_t *otg_dev = &priv->dwc_otg_device;
-    irqstate_t flags;
 
-    flags = irqsave();
-
-    /*
-     * Disable and detach the USB IRQs
-     */
-    if (otg_dev->common_irq_installed) {
-        up_disable_irq(TSB_IRQ_HSIC);
-        irq_detach(TSB_IRQ_HSIC);
-    } else {
-        DWC_DEBUGPL(DBG_ANY, "%s: There is no installed irq!\n", __func__);
-        goto restore_irq;
-    }
-
-    if (otg_dev->core_if) {
-        dwc_otg_cil_remove(otg_dev->core_if);
-    } else {
+    if (!otg_dev->core_if) {
         DWC_DEBUGPL(DBG_ANY, "%s: otg_dev->core_if NULL!\n", __func__);
-        goto restore_irq;
+        return -1;
     }
+
+    dwc_otg_cil_remove(otg_dev->core_if);
 
     if (priv->driver) {
         usbdev_unregister(priv->driver);
     }
 
-    tsb_clk_disable(TSB_CLK_HSIC480);
-    tsb_clk_disable(TSB_CLK_HSICREF);
-    tsb_clk_disable(TSB_CLK_HSICBUS);
- restore_irq:
-    irqrestore(flags);
+    return 0;
 }
 
 /****************************************************************************
@@ -834,7 +777,7 @@ int usbdev_register(struct usbdevclass_driver *driver)
         /*
          * Enable USB controller interrupts at the NVIC
          */
-        up_enable_irq(TSB_IRQ_HSIC);
+        irq_enable_line(TSB_IRQ_HSIC);
 
         priv->usbdev.speed = driver->speed;
     }
@@ -860,7 +803,6 @@ int usbdev_unregister(struct usbdevclass_driver *driver)
      * easier.
      */
     struct dwc_usbdev *priv = &g_usbdev;
-    irqstate_t flags;
 
 #ifdef CONFIG_DEBUG
     if (driver != priv->driver) {
@@ -873,7 +815,7 @@ int usbdev_unregister(struct usbdevclass_driver *driver)
      * canceled while the class driver is still bound.
      */
 
-    flags = irqsave();
+    irq_disable();
 
     /*
      * Unbind the class driver
@@ -885,7 +827,7 @@ int usbdev_unregister(struct usbdevclass_driver *driver)
      */
     priv->driver = NULL;
 
-    irqrestore(flags);
+    irq_enable();
 
     return 0;
 }
