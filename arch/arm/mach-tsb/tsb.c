@@ -55,11 +55,16 @@ struct bridge {
 };
 
 extern struct device_driver dw_driver;
+extern struct device_driver tca6408_driver;
 
 static void apb2_init(void)
 {
 #ifdef CONFIG_I2C_DW
     device_register(&dw_driver);
+#endif
+
+#ifdef CONFIG_TCA6408
+    device_register(&tca6408_driver);
 #endif
 }
 
