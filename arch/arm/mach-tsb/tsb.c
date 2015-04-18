@@ -28,9 +28,9 @@
 
 #include "scm.h"
 #include "chip.h"
+#include "gpio.h"
 
 #include <config.h>
-#include <asm/gpio.h>
 #include <asm/hwio.h>
 #include <phabos/driver.h>
 
@@ -100,6 +100,7 @@ static struct bridge bridge = {
 
 void machine_init(void)
 {
+    tsb_gpio_initialize();
     early_uart_init();
     bridge.init();
 }

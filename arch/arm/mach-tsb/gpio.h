@@ -29,29 +29,45 @@
  *          Benoit Cousson <bcousson@baylibre.com>
  */
 
-#ifndef _TSB_GPIO_H_
-#define _TSB_GPIO_H_
+#ifndef __TSB_GPIO_H__
+#define __TSB_GPIO_H__
 
 #include <stdint.h>
+#include <phabos/gpio.h>
 
-int gpio_get_direction(uint8_t which);
-void gpio_direction_in(uint8_t which);
-void gpio_direction_out(uint8_t which, uint8_t value);
-void gpio_activate(uint8_t which);
-uint8_t gpio_get_value(uint8_t which);
-void gpio_set_value(uint8_t which, uint8_t value);
-int gpio_set_debounce(uint8_t which, uint16_t delay);
-void gpio_deactivate(uint8_t which);
-uint8_t gpio_line_count(void);
-void gpio_initialize(void);
-void gpio_uninitialize(void);
-int gpio_irqattach(int irq, gpio_irq_handler_t isr);
-void set_gpio_triggering(uint8_t which, int trigger);
-void gpio_mask_irq(uint8_t which);
-void gpio_unmask_irq(uint8_t which);
-void gpio_clear_interrupt(uint8_t which);
-uint32_t gpio_get_raw_interrupt(uint8_t which);
-uint32_t gpio_get_interrupt(void);
+struct tsb_gpio_dev {
+    struct gpio_device dev;
+};
 
-#endif /* _TSB_GPIO_H_ */
+#define TSB_IRQ_TYPE_LEVEL_LOW      0x0
+#define TSB_IRQ_TYPE_LEVEL_HIGH     0x1
+#define TSB_IRQ_TYPE_EDGE_FALLING   0x2
+#define TSB_IRQ_TYPE_EDGE_RISING    0x3
+#define TSB_IRQ_TYPE_EDGE_BOTH      0x7
+
+int tsb_gpio_get_direction(struct gpio_device *dev, unsigned int line);
+void tsb_gpio_direction_in(struct gpio_device *dev, unsigned int line);
+void tsb_gpio_direction_out(struct gpio_device *dev, unsigned int line,
+                            unsigned int value);
+int tsb_gpio_get_value(struct gpio_device *dev, unsigned int line);
+int tsb_gpio_set_value(struct gpio_device *dev, unsigned int line,
+                        unsigned int value);
+void tsb_gpio_activate(struct gpio_device *dev, unsigned int line);
+void tsb_gpio_deactivate(struct gpio_device *dev, unsigned int line);
+int tsb_gpio_set_debounce(struct gpio_device *dev, unsigned int line,
+                          uint16_t delay);
+int tsb_gpio_mask_irq(struct gpio_device *dev, unsigned int line);
+int tsb_gpio_unmask_irq(struct gpio_device *dev, unsigned int line);
+int tsb_gpio_clear_interrupt(struct gpio_device *dev, unsigned int line);
+int tsb_gpio_irqattach(struct gpio_device *dev, unsigned int irq,
+                       gpio_irq_handler_t isr);
+int tsb_gpio_set_triggering(struct gpio_device *dev, unsigned int line,
+                             int trigger);
+uint32_t tsb_gpio_get_raw_interrupt(unsigned int line);
+uint32_t tsb_gpio_get_interrupt(void);
+
+void tsb_gpio_initialize(void);
+void tsb_gpio_uninitialize(void);
+
+#endif /* __TSB_GPIO_H__ */
 
