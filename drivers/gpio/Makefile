@@ -3,5 +3,6 @@
 #
 # Provided under the three clause BSD license found in the LICENSE file.
 
+obj-$(CONFIG_GPIO) += core.o
 obj-$(CONFIG_TCA6408) += tca6408.o
 obj-$(CONFIG_TCA6408_TESTAPP) += tca6408-testapp.o
