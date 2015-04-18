@@ -32,17 +32,28 @@
 #define _TSB_TCA6408_H_
 
 #include <stdint.h>
-#include <stdbool.h>
+#include <phabos/gpio.h>
+#include <phabos/i2c.h>
 
-int tca6408_reset(uint8_t gpio, bool en);
-int tca6408_set_direction_in(uint8_t bus, uint8_t addr, uint8_t which);
-int tca6408_set_default_outputs(uint8_t bus, uint8_t addr, uint8_t dflt);
-int tca6408_set_direction_out(uint8_t bus, uint8_t addr, uint8_t which);
-int tca6408_get_direction(uint8_t bus, uint8_t addr, uint8_t which);
-int tca6408_set_polarity_inverted(uint8_t bus, uint8_t addr,
-                                  uint8_t which, uint8_t inverted);
-int tca6408_get_polarity_inverted(uint8_t bus, uint8_t addr, uint8_t which);
-int tca6408_set(uint8_t bus, uint8_t addr, uint8_t which, uint8_t val);
-int tca6408_get(uint8_t bus, uint8_t addr, uint8_t which);
+struct tca6408_dev {
+    struct gpio_device dev;
+    struct i2c_adapter *adapter;
+};
+
+struct tca6408_dev *tca6408_init(struct i2c_adapter *adapter);
+void tca6408_exit(struct tca6408_dev *tca6408);
+
+void tca6408_set_direction_in(struct gpio_device *device, unsigned int which);
+int tca6408_set_default_outputs(struct gpio_device *device, uint8_t dflt);
+void tca6408_set_direction_out(struct gpio_device *device, unsigned int which,
+                               unsigned int value);
+int tca6408_get_direction(struct gpio_device *device, unsigned int which);
+int tca6408_set_polarity_inverted(struct gpio_device *device,
+                                  unsigned int which, uint8_t inverted);
+int tca6408_get_polarity_inverted(struct gpio_device *device,
+                                  unsigned int which);
+int tca6408_set(struct gpio_device *device, unsigned int which,
+                unsigned int val);
+int tca6408_get(struct gpio_device *driver, unsigned int which);
 
 #endif
