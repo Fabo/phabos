@@ -29,7 +29,37 @@
 #ifndef __PHABOS_I2C_DW_H__
 #define __PHABOS_I2C_DW_H__
 
-struct i2c_dev *dw_init(struct device_driver *driver);
+#include <lib/mutex.h>
+#include <lib/semaphore.h>
+#include <phabos/watchdog.h>
+
+struct dw_dev {
+    struct i2c_adapter  adapter;   /* Generic I2C adapter */
+    unsigned long       base;
+
+    struct i2c_msg      *msgs;     /* Generic messages array */
+    struct mutex        mutex;     /* Only one thread can access at a time */
+    struct semaphore    wait;      /* Wait for state machine completion */
+    struct watchdog     timeout;   /* Watchdog to timeout when bus hung */
+
+    unsigned int        tx_index;
+    unsigned int        tx_length;
+    uint8_t             *tx_buffer;
+
+    unsigned int        rx_index;
+    unsigned int        rx_length;
+    uint8_t             *rx_buffer;
+
+    unsigned int        msgs_count;
+    int                 cmd_err;
+    int                 msg_err;
+    unsigned int        status;
+    uint32_t            abort_source;
+    unsigned int        rx_outstanding;
+};
+
+struct dw_dev *dw_init(void);
+void dw_exit(struct dw_dev *dw);
 
 #endif /* __PHABOS_I2C_DW_H__ */
 

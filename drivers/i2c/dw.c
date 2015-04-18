@@ -30,9 +30,10 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <asm/hwio.h>
-#include <asm/irq.h>
+#include <asm/spinlock.h>
 #include <asm/tsb-irq.h>
 #include <asm/machine.h>
 
@@ -42,36 +43,13 @@
 #include <phabos/utils.h>
 
 #include <phabos/i2c.h>
-#include <phabos/watchdog.h>
+#include <phabos/i2c/dw.h>
 
 #include "dw.h"
 
 /* disable the verbose debug output */
 #undef lldbg
 #define lldbg(x...)
-
-struct dw_dev {
-    struct i2c_dev   dev;        /* Generic Nuttx I2C device */
-    struct i2c_msg   *msgs;      /* Generic messages array */
-    struct mutex     mutex;      /* Only one thread can access at a time */
-    struct semaphore wait;       /* Wait for state machine completion */
-    struct watchdog  timeout;    /* Watchdog to timeout when bus hung */
-
-    unsigned int     tx_index;
-    unsigned int     tx_length;
-    uint8_t          *tx_buffer;
-
-    unsigned int     rx_index;
-    unsigned int     rx_length;
-    uint8_t          *rx_buffer;
-
-    unsigned int     msgs_count;
-    int              cmd_err;
-    int              msg_err;
-    unsigned int     status;
-    uint32_t         abort_source;
-    unsigned int     rx_outstanding;
-};
 
 /* I2C controller configuration */
 #define DW_I2C_CONFIG (DW_I2C_CON_RESTART_EN | \
@@ -92,19 +70,19 @@ struct dw_dev {
 #define DW_I2C_TIMEOUT              10000000        /* 1sec in usec */
 
 
-void dw_mach_initialize(struct i2c_dev *dev);
+void dw_mach_initialize(struct i2c_adapter *dev);
 void dw_mach_destroy(void);
 
 static uint32_t dw_read(struct dw_dev *dev, int offset)
 {
     assert(dev);
-    return read32(dev->dev.base + offset);
+    return read32(dev->base + offset);
 }
 
 static void dw_write(struct dw_dev *dev, int offset, uint32_t b)
 {
     assert(dev);
-    write32(dev->dev.base + offset, b);
+    write32(dev->base + offset, b);
 }
 
 static void tsb_i2c_clear_int(struct dw_dev *dev)
@@ -375,19 +353,15 @@ static int tsb_i2c_handle_tx_abort(struct dw_dev *dev)
 }
 
 /* Perform a sequence of I2C transfers */
-static int dw_transfer(struct i2c_dev *i2c_dev, struct i2c_msg *msg, size_t count)
+static int dw_transfer(struct i2c_adapter *adapter, struct i2c_msg *msg,
+                       size_t count)
 {
     int ret;
-    struct dw_dev *dev = containerof(i2c_dev, struct dw_dev, dev);
+    struct dw_dev *dev = containerof(adapter, struct dw_dev, adapter);
 
     lldbg("msgs: %d\n", count);
 
     mutex_lock(&dev->mutex);
-    /**
-     * FIXME This seems wrong to me to disable the IRQs when calling
-     * watchdog_start, and especially when calling semaphore_lock
-     */
-//    irq_disable();
 
     dev->msgs = msg;
     dev->msgs_count = count;
@@ -451,7 +425,6 @@ static int dw_transfer(struct i2c_dev *i2c_dev, struct i2c_msg *msg, size_t coun
     lldbg("unknown error %x\n", ret);
 
 done:
-//    irq_enable();
     mutex_unlock(&dev->mutex);
 
     return ret;
@@ -492,7 +465,7 @@ static uint32_t tsb_dw_read_clear_intrbits(struct dw_dev *dev)
 static void dw_interrupt(int irq, void *data)
 {
     uint32_t stat, enabled;
-    struct dw_dev *dev = containerof(data, struct dw_dev, dev);
+    struct dw_dev *dev = data;
 
     enabled = dw_read(dev, DW_I2C_ENABLE);
     stat = dw_read(dev, DW_I2C_RAW_INTR_STAT);
@@ -535,10 +508,11 @@ tx_aborted:
 static void dw_timeout(struct watchdog *wd)
 {
     struct dw_dev *dev = wd->user_priv;
+    struct spinlock timeout_lock = SPINLOCK_INIT(timeout_lock);
 
     lldbg("\n");
 
-    irq_disable();
+    spinlock_lock(&timeout_lock);
 
     if (dev->status != DW_I2C_STATUS_IDLE)
     {
@@ -548,55 +522,78 @@ static void dw_timeout(struct watchdog *wd)
         semaphore_unlock(&dev->wait);
     }
 
-    irq_enable();
+    spinlock_unlock(&timeout_lock);
 }
 
-struct i2c_ops dev_i2c_ops;
+struct fops dw_fops;
 
-struct i2c_dev *dw_init(struct device_driver *driver)
+struct dw_dev *dw_init(void)
 {
-    struct dw_dev *dev;
+    int retval;
+    struct dw_dev *dw;
 
-    dev = malloc(sizeof(*dev));
-    if (!dev)
+    dw = malloc(sizeof(*dw));
+    if (!dw)
         return NULL;
+    memset(dw, 0, sizeof(*dw));
 
-    mutex_init(&dev->mutex);
-    semaphore_init(&dev->wait, 0);
+    dw->adapter.dev.name = "dw-i2c";
+    dw->adapter.dev.description = "I2C adapter";
+    dw->adapter.dev.class = DEVICE_CLASS_I2C;
+    dw->adapter.dev.ops = dw_fops;
+    dw->adapter.transfer = dw_transfer;
+    dw->adapter.irq = dw_interrupt;
+
+    mutex_init(&dw->mutex);
+    semaphore_init(&dw->wait, 0);
 
     /* Allocate a watchdog timer */
-    watchdog_init(&dev->timeout);
-    dev->timeout.timeout = dw_timeout;
-    dev->timeout.user_priv = dev;
+    watchdog_init(&dw->timeout);
+    dw->timeout.timeout = dw_timeout;
+    dw->timeout.user_priv = dw;
 
-    /* Install our operations */
-    dev->dev.ops = &dev_i2c_ops;
+    retval =  i2c_adapter_register(&dw->adapter);
+    GOTO_IF_FAIL(!retval, adapter_register_error);
 
-    driver->priv = &dev->dev;
+    return dw;
 
-    return &dev->dev;
+adapter_register_error:
+    watchdog_delete(&dw->timeout);
+    free(dw);
+
+    return NULL;
 }
 
-static int dw_open(struct i2c_dev *dev)
+void dw_exit(struct dw_dev *dw)
 {
+    RET_IF_FAIL(dw,);
+
+    i2c_adapter_unregister(&dw->adapter);
+    watchdog_delete(&dw->timeout);
+    free(dw);
+}
+
+static int dw_open(struct device_driver *dev)
+{
+    struct i2c_adapter *adapter = containerof(dev, struct i2c_adapter, dev);
+    struct dw_dev *dw_dev = containerof(adapter, struct dw_dev, adapter);
+
     /* Initialize the I2C controller */
-    tsb_i2c_init(containerof(dev, struct dw_dev, dev));
+    tsb_i2c_init(dw_dev);
     return 0;
 }
 
-static void dw_close(struct i2c_dev *dev)
+static void dw_close(struct device_driver *dev)
 {
-    struct dw_dev *device = containerof(dev, struct dw_dev, dev);
+    struct i2c_adapter *adapter = containerof(dev, struct i2c_adapter, dev);
+    struct dw_dev *dw = containerof(adapter, struct dw_dev, adapter);
 
     lldbg("\n");
 
-    watchdog_delete(&device->timeout);
-    free(device);
+    watchdog_cancel(&dw->timeout);
 }
 
-struct i2c_ops dev_i2c_ops = {
-    .open           = dw_open,
-    .close          = dw_close,
-    .transfer       = dw_transfer,
-    .irq            = dw_interrupt,
+struct fops dw_fops = {
+    .open       = dw_open,
+    .close      = dw_close,
 };
