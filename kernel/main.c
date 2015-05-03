@@ -10,6 +10,7 @@
 #include <phabos/kprintf.h>
 #include <phabos/scheduler.h>
 #include <phabos/syscall.h>
+#include <phabos/fs.h>
 
 int CONFIG_INIT_TASK_NAME(int argc, char **argv);
 
@@ -22,6 +23,19 @@ void init(void *data)
         xstr(CONFIG_INIT_TASK_NAME),
         NULL
     };
+
+#if 1
+    {
+        fs_init();
+
+//        extern struct fs ramfs_fs;
+//        fs_register(&ramfs_fs);
+
+        mount(NULL, NULL, "ramfs", 0, NULL);
+//        mkdir(NULL, "/test", 0);
+    }
+#endif
+
     CONFIG_INIT_TASK_NAME(1, argv);
 
     while (1);
