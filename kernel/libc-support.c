@@ -40,9 +40,16 @@ void __malloc_unlock(struct _reent *reent)
     spinlock_unlock(&malloc_spinlock);
 }
 
-int _write(int fd, char *buffer, int count)
+#include <phabos/syscall.h>
+ssize_t sys_write(int fd, char *buffer, size_t count)
 {
     return low_write(buffer, count);
+}
+//DEFINE_SYSCALL(SYS_WRITE, write, 3);
+
+int _write(int fd, char *buffer, int count)
+{
+    return sys_write(fd, buffer, count);
 }
 
 int _close(int fd)
