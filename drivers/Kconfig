@@ -42,4 +42,6 @@ if USB
 source drivers/usb/Kconfig
 endif
 
+source drivers/fs/Kconfig
+
 endmenu
