@@ -1,11 +1,9 @@
 #ifndef __FS_H__
 #define __FS_H__
 
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <phabos/assert.h>
-
-#define S_IFREG     0x100000
-#define S_IFDIR     0x040000
 
 struct inode;
 
@@ -21,6 +19,8 @@ struct inode {
     struct fs *fs;
     void *inode;
     unsigned long flags;
+
+    struct inode *mounted_inode;
 };
 
 struct file {

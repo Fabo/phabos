@@ -8,6 +8,7 @@
 #include <phabos/hashtable.h>
 #include <phabos/syscall.h>
 #include <phabos/fs.h>
+#include <phabos/utils.h>
 
 static struct inode *root;
 static struct hashtable fs_table;
@@ -15,6 +16,11 @@ static struct hashtable fs_table;
 void fs_init(void)
 {
     hashtable_init_string(&fs_table);
+
+    root = zalloc(sizeof(*root));
+    RET_IF_FAIL(root,);
+
+    root->flags = S_IFDIR;
 }
 
 int fs_register(struct fs *fs)
@@ -95,11 +101,16 @@ int sys_mount(const char *source, const char *target, const char *filesystemtype
     if (target)
         fs_walk(root, target);
 
+    /* Cannot find target or target is not a directory */
     if (!cwd || !is_directory(cwd))
         return -ENOTDIR;
 
+    /* Directory already mounted */
+    if (cwd->mounted_inode)
+        return -EBUSY;
+
     printf("mounting '%s' fs to '%s'\n", fs->name, target ? target : "/");
-    cwd->fs = fs;
+    cwd->mounted_inode = ; // FIXME moutn
 
     return 0;
 }

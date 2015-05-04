@@ -7,6 +7,10 @@
 
 #include <config.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <string.h>
+#include <stdio.h>
+
 #include <phabos/kprintf.h>
 #include <phabos/scheduler.h>
 #include <phabos/syscall.h>
@@ -26,12 +30,15 @@ void init(void *data)
 
 #if 1
     {
+        int retval;
         fs_init();
 
-//        extern struct fs ramfs_fs;
-//        fs_register(&ramfs_fs);
+        extern struct fs ramfs_fs;
+        fs_register(&ramfs_fs);
 
-        mount(NULL, NULL, "ramfs", 0, NULL);
+        retval = mount(NULL, NULL, "ramfs", 0, NULL);
+        if (retval < 0)
+            printf("failed to mount the ramfs: %s\n", strerror(errno));
 //        mkdir(NULL, "/test", 0);
     }
 #endif

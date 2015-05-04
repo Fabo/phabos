@@ -53,6 +53,7 @@ error_filename_alloc:
     return NULL;
 }
 
+#if 0
 static int ramfs_creat(struct inode *cwd, const char *name, mode_t mode)
 {
     struct ramfs_inode *cwd_inode = cwd->inode;
@@ -66,6 +67,7 @@ static int ramfs_creat(struct inode *cwd, const char *name, mode_t mode)
     inode = ramfs_create_inode(inode->name);
     return 0;
 }
+#endif
 
 static int ramfs_mkdir(struct inode *cwd, const char *name, mode_t mode)
 {
@@ -73,14 +75,12 @@ static int ramfs_mkdir(struct inode *cwd, const char *name, mode_t mode)
     struct ramfs_inode *inode;
 
     RET_IF_FAIL(cwd, -EINVAL);
-//    RET_IF_FAIL(cwd->flags & FS_DIRECTORY, -EINVAL);
+    RET_IF_FAIL(!is_directory(cwd), -EINVAL);
     RET_IF_FAIL(name, -EINVAL);
 
-    inode = ramfs_create_inode(inode->name);
+    inode = ramfs_create_inode(name);
     hashtable_add(&cwd_inode->files, inode->name, inode);
 
-error_filename_alloc:
-    free(inode);
     return 0;
 }
 
@@ -158,14 +158,13 @@ static ssize_t ramfs_write(struct file_table *ftable, const void *buf,
 
 static struct inode *ramfs_find(struct inode *cwd, const char *name)
 {
-    struct ramfs_inode *cwd_inode = cwd->inode;
-    struct ramfs_inode *inode;
+    struct ramfs_inode *inode = cwd->inode;
 
-    RET_IF_FAIL(cwd, -EINVAL);
-    RET_IF_FAIL(name, -EINVAL);
+    RET_IF_FAIL(cwd, NULL);
+    RET_IF_FAIL(name, NULL);
 
     // TODO: check name size and truncate if necessary
-    return hashtable_get(&inode->files, name);
+    return hashtable_get(&inode->files, (void*) name);
 }
 
 #if 0
@@ -183,9 +182,9 @@ static int ramfs_get(something *dir, struct dirent *entry, struct dirent **resul
 struct fs ramfs_fs = {
     .name = "ramfs",
     .mkdir = ramfs_mkdir,
-    .opendir = ramfs_opendir,
-    .readdir = ramfs_readdir,
-    .closedir = ramfs_closedir,
+//    .opendir = ramfs_opendir,
+//    .readdir = ramfs_readdir,
+//    .closedir = ramfs_closedir,
     .find = ramfs_find,
 };
 
