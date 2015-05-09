@@ -13,10 +13,13 @@
 #include <asm/scheduler.h>
 #include <phabos/list.h>
 #include <phabos/mutex.h>
+#include <phabos/hashtable.h>
 
 struct task {
     int id;
     uint16_t state;
+    hashtable_t fd;
+
     register_t registers[MAX_REG];
     void *allocated_stack;
 

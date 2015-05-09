@@ -9,6 +9,10 @@
 #include <phabos/syscall.h>
 #include <phabos/fs.h>
 #include <phabos/utils.h>
+#include <phabos/string.h>
+#include <phabos/scheduler.h>
+
+#define O_CLOEXEC 0x80000
 
 static struct inode *root;
 static struct hashtable fs_table;
@@ -49,6 +53,10 @@ struct inode *_fs_walk(struct inode *cwd, char *pathname)
         i = 0;
     }
 
+    if (cwd->mounted_inode) {
+        cwd = cwd->mounted_inode;
+    }
+
     if (pathname[0] == '\0')
         return cwd;
 
@@ -59,11 +67,11 @@ struct inode *_fs_walk(struct inode *cwd, char *pathname)
         ;
 
     if (pathname[j] == '\0') {
-        return cwd->fs->find(cwd, pathname);
+        return cwd->fs->lookup(cwd, pathname);
     }
 
     pathname[i] = '\0';
-    return _fs_walk(cwd->fs->find(cwd, pathname), pathname + j);
+    return _fs_walk(cwd->fs->lookup(cwd, pathname), pathname + j);
 }
 
 struct inode *fs_walk(struct inode *cwd, const char *pathname)
@@ -80,7 +88,7 @@ struct inode *fs_walk(struct inode *cwd, const char *pathname)
     RET_IF_FAIL(path, NULL);
 
     memcpy(path, pathname, length);
-    node = fs_walk(cwd, path);
+    node = _fs_walk(cwd, path);
     free(path);
 
     return node;
@@ -91,6 +99,7 @@ int sys_mount(const char *source, const char *target, const char *filesystemtype
 {
     struct fs *fs;
     struct inode *cwd = root;
+    int retval;
 
     RET_IF_FAIL(root || !target, -EINVAL);
 
@@ -109,17 +118,35 @@ int sys_mount(const char *source, const char *target, const char *filesystemtype
     if (cwd->mounted_inode)
         return -EBUSY;
 
-    printf("mounting '%s' fs to '%s'\n", fs->name, target ? target : "/");
-    cwd->mounted_inode = ; // FIXME moutn
+    // TODO: check that the directory is empty
+
+    kprintf("mounting '%s' fs to '%s'\n", fs->name, target ? target : "/");
+
+    cwd->mounted_inode = zalloc(sizeof(*cwd->mounted_inode));
+    if (!cwd->mounted_inode)
+        return -ENOMEM;
+
+    cwd->mounted_inode->fs = fs;
+    cwd->mounted_inode->flags = S_IFDIR;
+
+    retval = fs->mount(cwd->mounted_inode);
+    if (retval)
+        goto error_mount;
 
     return 0;
+
+error_mount:
+    free(cwd->mounted_inode);
+    cwd->mounted_inode = NULL;
+
+    return retval;
 }
 DEFINE_SYSCALL(SYS_MOUNT, mount, 5);
 
 int mount(const char *source, const char *target, const char *filesystemtype,
           unsigned long mountflags, const void *data)
 {
-    int retval =
+    long retval =
         syscall(SYS_MOUNT, source, target, filesystemtype, mountflags, data);
 
     if (retval) {
@@ -130,166 +157,215 @@ int mount(const char *source, const char *target, const char *filesystemtype,
     return 0;
 }
 
-static int fs_get_last_component_offset(const char *pathname)
+int sys_mkdir(const char *pathname, mode_t mode)
 {
-    int i;
+    struct inode *inode;
+    char *name;
+    char *path;
+    int retval;
 
-    RET_IF_FAIL(pathname, -EINVAL);
-
-    i = strlen(pathname);
-    if (i <= 0)
+    if (!pathname)
         return -EINVAL;
 
-    while (i >= 0 && pathname[i] == '/')
-        i--;
-    if (i < 0)
-        return i;
+    name = abasename(pathname);
+    path = adirname(pathname);
 
-    while (i >= 0 && pathname[i] != '/')
-        i--;
+    kprintf("creating directory '%s' in %s\n", name, path);
 
-    return i;
-}
-
-#if 0
-int mkdir(struct inode *cwd, const char *pathname, mode_t mode)
-{
-    int i;
-
-    RET_IF_FAIL(pathname, -EINVAL);
-
-    i = strlen(pathname);
-    if (i == 0)
-        return -EINVAL;
-
-    while (i > 0 && pathname[i] == '/')
-        i--;
-
-    if (i <= 0)
-        return -EEXIST;
-
-    while (i > 0 && pathname[i] != '/')
-        i--;
-
-    if (i) {
-        size_t length;
-        char *path;
-
-        length = strlen(pathname) + 1;
-        path = malloc(length);
-
-        RET_IF_FAIL(path, -ENOMEM);
-
-        memcpy(path, pathname, length);
-        cwd = fs_walk(cwd, path);
-        free(path);
+    inode = _fs_walk(root, path);
+    if (!inode) {
+        retval = -ENOENT;
+        goto exit;
     }
 
-    if (!cwd || !is_directory(cwd))
-        return -ENOTDIR;
+    if (inode->mounted_inode) {
+        inode = inode->mounted_inode;
+    }
 
-    cwd->fs->mkdir(cwd, pathname + 1);
+    RET_IF_FAIL(inode->fs, -EINVAL);
+    RET_IF_FAIL(inode->fs->lookup, -EINVAL);
+    RET_IF_FAIL(inode->fs->mkdir, -EINVAL);
+
+    if (inode->fs->lookup(inode, name)) {
+        retval = -EEXIST;
+        goto exit;
+    }
+
+    retval = inode->fs->mkdir(inode, name, mode);
+
+exit:
+    free(name);
+    free(path);
+
+    return retval;
+}
+DEFINE_SYSCALL(SYS_MKDIR, mkdir, 5);
+
+int mkdir(const char *pathname, mode_t mode)
+{
+    long retval = syscall(SYS_MKDIR, pathname, mode);
+
+    if (retval) {
+        errno = -retval;
+        return -1;
+    }
 
     return 0;
 }
-#endif
 
-int open(const char *pathname, int flags, ...)
+#define TASK_FD_MAX 20
+
+static int allocate_fdnum(void)
 {
+    struct task *task;
+    struct fd *fd;
+
+    task = task_get_running();
+    RET_IF_FAIL(task, -1);
+
+    for (int i = 0; i < TASK_FD_MAX; i++) {
+        fd = hashtable_get(&task->fd, (void*) i);
+        if (fd)
+            continue;
+
+        fd = zalloc(sizeof(*fd));
+        hashtable_add(&task->fd, (void*) i, fd);
+        return i;
+    }
+
     return -1;
 }
 
-#if 0
-int fs_mount(struct inode *node, struct fs *fs)
+static int free_fdnum(int fdnum)
 {
-    struct inode *cwd = node;
+    struct task *task;
+    struct fd *fd;
 
-    RET_IF_FAIL(fs, -EINVAL);
+    task = task_get_running();
+    RET_IF_FAIL(task,-1);
 
-    if (!cwd && root)
-        return -EBUSY;
+    fd = hashtable_get(&task->fd, (void*) fdnum);
+    if (!fdnum)
+        return -EBADF;
 
-    if (!cwd) {
-        root = malloc(sizeof(*root));
-        memset(root, 0, sizeof(*root));
+    hashtable_remove(&task->fd, (void*) fdnum);
 
-        RET_IF_FAIL(root, -ENOMEM);
-        cwd = root;
-    }
-
-    RET_IF_FAIL(cwd->fs != NULL, -EBUSY);
-#if 0 // FIXME
-    RET_IF_FAIL(fs_is_directory(node), -EACCES);
-    RET_IF_FAIL(directory_is_empty(node), -EACCES);
-#endif
-
-    cwd->fs = fs;
+    free(fd->file);
+    free(fd);
 
     return 0;
 }
 
-int fs_umount(struct inode *node)
+int sys_open(const char *pathname, int flags, mode_t mode)
 {
-    node->fs = NULL;
+    struct task *task;
+    struct inode *inode;
+    struct fd *fd;
+    int fdnum;
+    int retval;
 
-    if (node == root)
-        root = NULL;
+    if (!pathname)
+        return -EINVAL;
 
-    return 0;
-}
+    kprintf("opening %s ...\n", pathname);
 
-int fs_mkdir(struct inode *cwd, const char *pathname, mode_t mode)
-{
-    if (pathname[0] == '/')
-        cwd = root;
+    inode = fs_walk(root, pathname);
 
-    
-}
-struct inode *fs_walk(struct inode *cwd, const char *pathname)
-{
-    int i = 0;
-    struct inode *dest = NULL;
+    if (inode && flags & O_CREAT && flags & O_EXCL)
+        return -EEXIST;
 
-    RET_IF_FAIL(cwd, NULL);
-    RET_IF_FAIL(cwd->fs, NULL);
-    RET_IF_FAIL(cwd->opendir, NULL);
-    RET_IF_FAIL(cwd->readdir, NULL);
-    RET_IF_FAIL(cwd->closedir, NULL);
+    fdnum = allocate_fdnum();
+    if (fdnum < 0)
+        return fdnum;
 
-    for (i = 0; pathname[i] != '/' && pathname[i] != '\0'; i++)
-        ;
+    task = task_get_running();
+    RET_IF_FAIL(task, -1);
 
-    struct dir *dir = cwd->fs->opendir();
+    fd = hashtable_get(&task->fd, (void*) fdnum);
 
-    for (struct dirent *ent = cwd->fs->readdir(dir);
-         ent;
-         cwd->fs->readdir(dir)) {
-        if (!strcmp(ent->filename, ))
+    if (flags & O_CLOEXEC)
+        fd->flags |= O_CLOEXEC;
+    flags &= ~O_CLOEXEC;
+
+    fd->file = zalloc(sizeof(*fd->file));
+    if (!fd->file) {
+        retval = -ENOMEM;
+        goto error_file_alloc;
     }
 
-    if (dest)
-        dest = walk(dest, pathname + i);
+    fd->file->inode = inode;
+    fd->file->flags = flags;
 
-    cwd->fs->closedir();
-    return dest;
+    return fdnum;
+
+error_file_alloc:
+    free_fdnum(fdnum);
+    return retval;
 }
+DEFINE_SYSCALL(SYS_OPEN, open, 3);
 
 int open(const char *pathname, int flags, ...)
 {
-    struct inode *inode;
+    mode_t mode = 0;
+    long retval;
+    va_list vl;
 
-    //inode = fs_find(pathname);
+    if (flags & O_CREAT) {
+        va_start(vl, flags);
+        mode = va_arg(vl, typeof(mode));
+        va_end(vl);
+    }
 
-    if (!inode && !(flags & O_CREAT)) {
-        errno = ENOENT;
+    retval = syscall(SYS_OPEN, pathname, flags, mode);
+
+    if (retval < 0) {
+        errno = -retval;
         return -1;
     }
 
-    if (inode && flags & O_CREAT && flags & O_EXCL) {
-        errno = EEXIST;
+    return retval;
+}
+
+int sys_close(int fd)
+{
+    kprintf("closing %d ...\n", fd);
+    free_fdnum(fd);
+    return 0;
+}
+DEFINE_SYSCALL(SYS_CLOSE, close, 1);
+
+int close(int fd)
+{
+    long retval =
+        syscall(SYS_CLOSE, fd);
+
+    if (retval < 0) {
+        errno = -retval;
         return -1;
     }
 
     return 0;
 }
-#endif
+
+int sys_getdents(int fd, struct phabos_dirent *dirp, size_t count)
+{
+    if (fd < 0)
+        return -EBADF;
+
+    if (count == 0)
+        return -EINVAL;
+}
+DEFINE_SYSCALL(SYS_GETDENTS, getdents, 3);
+
+int getdents(int fd, struct SOMETYPENAME *dirp, size_t count)
+{
+    long retval =
+        syscall(SYS_CLOSE, fd);
+
+    if (retval < 0) {
+        errno = -retval;
+        return -1;
+    }
+
+    return 0;
+}

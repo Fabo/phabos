@@ -30,5 +30,10 @@ static inline size_t vector_get_size(struct vector *vector)
     return vector->count;
 }
 
+static inline void **vector_get_data(struct vector *vector)
+{
+    return vector->buffer;
+}
+
 #endif /* __VECTOR_H__ */
 

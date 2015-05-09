@@ -39,7 +39,44 @@ void init(void *data)
         retval = mount(NULL, NULL, "ramfs", 0, NULL);
         if (retval < 0)
             printf("failed to mount the ramfs: %s\n", strerror(errno));
-//        mkdir(NULL, "/test", 0);
+
+        retval = mkdir("/test/", 0);
+        if (retval < 0)
+            printf("mkdir failed: %s\n", strerror(errno));
+
+        retval = mkdir("/toto/", 0);
+        if (retval < 0)
+            printf("mkdir failed: %s\n", strerror(errno));
+
+        retval = mkdir("/test/tata", 0);
+        if (retval < 0)
+            printf("mkdir failed: %s\n", strerror(errno));
+
+        retval = mkdir("/test/tata/tutu", 0);
+        if (retval < 0)
+            printf("mkdir failed: %s\n", strerror(errno));
+
+        retval = mkdir("/toto/tata/tutu", 0);
+        if (retval < 0)
+            printf("mkdir failed: %s\n", strerror(errno));
+
+        retval = open("/", 0);
+        if (retval < 0)
+            printf("open failed: %s\n", strerror(errno));
+        else
+            printf("allocated fd: %d\n", retval);
+
+        retval = open("/test", 0);
+        if (retval < 0)
+            printf("open failed: %s\n", strerror(errno));
+        else
+            printf("allocated fd: %d\n", retval);
+
+        retval = close(retval);
+        if (retval < 0)
+            printf("close failed: %s\n", strerror(errno));
+        else
+            printf("closed fd\n");
     }
 #endif
 

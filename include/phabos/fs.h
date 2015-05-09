@@ -10,9 +10,10 @@ struct inode;
 struct fs {
     const char *name;
 
+    int (*mount)(struct inode *cwd);
     int (*mkdir)(struct inode *cwd, const char *name, mode_t mode);
 
-    struct inode *(*find)(struct inode *cwd, const char *name);
+    struct inode *(*lookup)(struct inode *cwd, const char *name);
 };
 
 struct inode {
@@ -34,11 +35,17 @@ struct fd {
     struct file *file;
 };
 
+struct phabos_dirent {
+};
+
 void fs_init(void);
 int fs_register(struct fs *fs);
 
+int open(const char *pathname, int flags, ...);
+int close(int fd);
 int mount(const char *source, const char *target, const char *filesystemtype,
           unsigned long mountflags, const void *data);
+int mkdir(const char *pathname, mode_t mode);
 
 static inline bool is_directory(struct inode *inode)
 {

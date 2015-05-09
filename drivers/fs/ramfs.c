@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/types.h>
+#include <stdio.h>
 
 #define RAMFS_MAX_FILENAME_SIZE     255
 #define RAMFS_DATA_BLOCK_SIZE       256
@@ -43,7 +44,7 @@ static struct ramfs_inode *ramfs_create_inode(const char *name)
     memcpy(inode->name, name, name_length -1);
     inode->name[name_length - 1] = '\0';
 
-    hashtable_init_uint(&inode->files);
+    hashtable_init_uint(&inode->blocks);
     hashtable_init_string(&inode->files);
 
     return inode;
@@ -72,14 +73,37 @@ static int ramfs_creat(struct inode *cwd, const char *name, mode_t mode)
 static int ramfs_mkdir(struct inode *cwd, const char *name, mode_t mode)
 {
     struct ramfs_inode *cwd_inode = cwd->inode;
-    struct ramfs_inode *inode;
+    struct ramfs_inode *ramfs_inode;
+    struct inode *inode;
 
     RET_IF_FAIL(cwd, -EINVAL);
-    RET_IF_FAIL(!is_directory(cwd), -EINVAL);
+    RET_IF_FAIL(is_directory(cwd), -EINVAL);
     RET_IF_FAIL(name, -EINVAL);
 
-    inode = ramfs_create_inode(name);
-    hashtable_add(&cwd_inode->files, inode->name, inode);
+    ramfs_inode = hashtable_get(&cwd_inode->files, (void*) name);
+    RET_IF_FAIL(!ramfs_inode, -EEXIST);
+
+    ramfs_inode = ramfs_create_inode(name);
+
+    inode = zalloc(sizeof(*inode));
+    inode->fs = cwd->mounted_inode ? cwd->mounted_inode->fs : cwd->fs;
+    inode->flags = S_IFDIR;
+    inode->inode = ramfs_inode;
+
+    hashtable_add(&cwd_inode->files, ramfs_inode->name, inode);
+    printf("adding '%s' in %p, inode = '%p'\n", name, cwd, inode);
+
+    return 0;
+}
+
+static int ramfs_mount(struct inode *cwd)
+{
+    RET_IF_FAIL(cwd, -EINVAL);
+    RET_IF_FAIL(is_directory(cwd), -EINVAL);
+
+    cwd->inode = ramfs_create_inode(".");
+    if (!cwd->inode)
+        return -ENOMEM;
 
     return 0;
 }
@@ -156,12 +180,15 @@ static ssize_t ramfs_write(struct file_table *ftable, const void *buf,
 }
 #endif
 
-static struct inode *ramfs_find(struct inode *cwd, const char *name)
+static struct inode *ramfs_lookup(struct inode *cwd, const char *name)
 {
     struct ramfs_inode *inode = cwd->inode;
 
     RET_IF_FAIL(cwd, NULL);
     RET_IF_FAIL(name, NULL);
+
+    printf("looking up for '%s' in %p, found '%p'\n",
+           name, cwd, hashtable_get(&inode->files, (void*) name));
 
     // TODO: check name size and truncate if necessary
     return hashtable_get(&inode->files, (void*) name);
@@ -181,10 +208,11 @@ static int ramfs_get(something *dir, struct dirent *entry, struct dirent **resul
 
 struct fs ramfs_fs = {
     .name = "ramfs",
+    .mount = ramfs_mount,
     .mkdir = ramfs_mkdir,
 //    .opendir = ramfs_opendir,
 //    .readdir = ramfs_readdir,
 //    .closedir = ramfs_closedir,
-    .find = ramfs_find,
+    .lookup = ramfs_lookup,
 };
 
