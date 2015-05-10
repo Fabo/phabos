@@ -30,7 +30,10 @@ void init(void *data)
 
 #if 1
     {
+        int fd;
         int retval;
+        struct phabos_dirent dirent;
+
         fs_init();
 
         extern struct fs ramfs_fs;
@@ -40,6 +43,7 @@ void init(void *data)
         if (retval < 0)
             printf("failed to mount the ramfs: %s\n", strerror(errno));
 
+#if 0
         retval = mkdir("/test/", 0);
         if (retval < 0)
             printf("mkdir failed: %s\n", strerror(errno));
@@ -60,23 +64,29 @@ void init(void *data)
         if (retval < 0)
             printf("mkdir failed: %s\n", strerror(errno));
 
-        retval = open("/", 0);
-        if (retval < 0)
+        fd = open("/", 0);
+        if (fd < 0)
             printf("open failed: %s\n", strerror(errno));
         else
-            printf("allocated fd: %d\n", retval);
+            printf("allocated fd: %d\n", fd);
 
-        retval = open("/test", 0);
-        if (retval < 0)
-            printf("open failed: %s\n", strerror(errno));
-        else
-            printf("allocated fd: %d\n", retval);
+        do {
+            retval = getdents(fd, &dirent, 1);
+            if (retval < 0)
+                printf("getdents failed: %s\n", strerror(errno));
 
-        retval = close(retval);
-        if (retval < 0)
+            if (retval <= 0)
+                break;
+
+            //printf("");
+        } while (retval > 0);
+
+        fd = close(fd);
+        if (fd < 0)
             printf("close failed: %s\n", strerror(errno));
         else
             printf("closed fd\n");
+#endif
     }
 #endif
 

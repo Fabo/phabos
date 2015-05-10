@@ -245,7 +245,7 @@ static int free_fdnum(int fdnum)
     RET_IF_FAIL(task,-1);
 
     fd = hashtable_get(&task->fd, (void*) fdnum);
-    if (!fdnum)
+    if (!fd)
         return -EBADF;
 
     hashtable_remove(&task->fd, (void*) fdnum);
@@ -329,8 +329,7 @@ int open(const char *pathname, int flags, ...)
 int sys_close(int fd)
 {
     kprintf("closing %d ...\n", fd);
-    free_fdnum(fd);
-    return 0;
+    return free_fdnum(fd);
 }
 DEFINE_SYSCALL(SYS_CLOSE, close, 1);
 
@@ -352,15 +351,23 @@ int sys_getdents(int fd, struct phabos_dirent *dirp, size_t count)
     if (fd < 0)
         return -EBADF;
 
-    if (count == 0)
-        return -EINVAL;
+//    if (count < sizeof()
+//        return -EINVAL;
+
+    printf("%s\n", __func__);
+
+//    getdents(fd, dirp, count);
+
+    printf("%s\n", __func__);
+
+    return 0;
 }
 DEFINE_SYSCALL(SYS_GETDENTS, getdents, 3);
 
-int getdents(int fd, struct SOMETYPENAME *dirp, size_t count)
+int getdents(int fd, struct phabos_dirent *dirp, size_t count)
 {
     long retval =
-        syscall(SYS_CLOSE, fd);
+        syscall(SYS_GETDENTS, fd);
 
     if (retval < 0) {
         errno = -retval;

@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <phabos/assert.h>
+#include <phabos/mutex.h>
 
 struct inode;
 
@@ -22,6 +23,7 @@ struct inode {
     unsigned long flags;
 
     struct inode *mounted_inode;
+    struct mutex dlock;
 };
 
 struct file {
@@ -46,6 +48,7 @@ int close(int fd);
 int mount(const char *source, const char *target, const char *filesystemtype,
           unsigned long mountflags, const void *data);
 int mkdir(const char *pathname, mode_t mode);
+int getdents(int fd, struct phabos_dirent *dirp, size_t count);
 
 static inline bool is_directory(struct inode *inode)
 {
