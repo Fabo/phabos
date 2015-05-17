@@ -16,6 +16,8 @@
 #include <phabos/syscall.h>
 #include <phabos/fs.h>
 
+#include <asm/hwio.h>
+
 int CONFIG_INIT_TASK_NAME(int argc, char **argv);
 
 #define xstr(s) str(s)
@@ -29,6 +31,7 @@ void init(void *data)
     };
 
 #if 1
+
     {
         int fd;
         int retval;
@@ -95,6 +98,53 @@ void init(void *data)
     while (1);
 }
 
+#include <asm/delay.h>
+
+static inline void go_to_user_mode(void)
+{
+    asm volatile (
+        "push {r0}\n"
+        "mrs r0, control\n"
+        "orr r0, #1\n"
+        "msr control, r0\n"
+        "pop {r0}\n"
+    );
+}
+
+void task1(void *data)
+{
+    int retval;
+
+    go_to_user_mode();
+    fs_init();
+
+    extern struct fs ramfs_fs;
+    fs_register(&ramfs_fs);
+
+    kprintf("%s\n", __func__);
+
+    retval = mount(NULL, NULL, "ramfs", 0, NULL);
+    if (retval < 0)
+        printf("failed to mount the ramfs: %s\n", strerror(errno));
+
+    while (1) {
+        kprintf("%s\n", __func__);
+
+        udelay(10000);
+    }
+}
+
+void task2(void *data)
+{
+    go_to_user_mode();
+
+    while (1) {
+        kprintf("%s\n", __func__);
+
+        udelay(10000);
+    }
+}
+
 static void clear_screen(void)
 {
     kprintf("\r%c[2J",27);
@@ -107,5 +157,7 @@ void main(void)
 
     syscall_init();
     scheduler_init();
-    task_run(init, NULL, 0);
+//    task_run(init, NULL, 0);
+    task_run(task1, NULL, 0);
+    task_run(task2, NULL, 0);
 }
