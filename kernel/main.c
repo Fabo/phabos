@@ -46,7 +46,7 @@ void init(void *data)
         if (retval < 0)
             printf("failed to mount the ramfs: %s\n", strerror(errno));
 
-#if 0
+#if 1
         retval = mkdir("/test/", 0);
         if (retval < 0)
             printf("mkdir failed: %s\n", strerror(errno));
@@ -157,7 +157,7 @@ void main(void)
 
     syscall_init();
     scheduler_init();
-//    task_run(init, NULL, 0);
-    task_run(task1, NULL, 0);
-    task_run(task2, NULL, 0);
+    task_run(init, NULL, 0);
+//    task_run(task1, NULL, 0);
+//    task_run(task2, NULL, 0);
 }

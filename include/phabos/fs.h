@@ -7,12 +7,17 @@
 #include <phabos/mutex.h>
 
 struct inode;
+struct file;
+struct phabos_dirent;
 
 struct fs {
     const char *name;
 
     int (*mount)(struct inode *cwd);
     int (*mkdir)(struct inode *cwd, const char *name, mode_t mode);
+
+    int (*getdents)(struct file *file, struct phabos_dirent *dirp,
+                    size_t count);
 
     struct inode *(*lookup)(struct inode *cwd, const char *name);
 };
@@ -38,6 +43,10 @@ struct fd {
 };
 
 struct phabos_dirent {
+    unsigned long d_ino;
+    unsigned long d_off;
+    unsigned short d_reclen;
+    char d_name[];
 };
 
 void fs_init(void);

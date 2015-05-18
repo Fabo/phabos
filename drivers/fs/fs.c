@@ -24,6 +24,7 @@ void fs_init(void)
     root = zalloc(sizeof(*root));
     RET_IF_FAIL(root,);
 
+    mutex_init(&root->dlock);
     root->flags = S_IFDIR;
 }
 
@@ -128,6 +129,7 @@ int sys_mount(const char *source, const char *target, const char *filesystemtype
 
     cwd->mounted_inode->fs = fs;
     cwd->mounted_inode->flags = S_IFDIR;
+    mutex_init(&cwd->mounted_inode->dlock);
 
     retval = fs->mount(cwd->mounted_inode);
     if (retval)
@@ -248,6 +250,7 @@ static int free_fdnum(int fdnum)
     if (!fd)
         return -EBADF;
 
+    mutex_unlock(&fd->file->inode->dlock); // FIXME safety checks
     hashtable_remove(&task->fd, (void*) fdnum);
 
     free(fd->file);
@@ -295,6 +298,8 @@ int sys_open(const char *pathname, int flags, mode_t mode)
 
     fd->file->inode = inode;
     fd->file->flags = flags;
+
+    mutex_lock(&inode->dlock);
 
     return fdnum;
 
@@ -346,21 +351,33 @@ int close(int fd)
     return 0;
 }
 
-int sys_getdents(int fd, struct phabos_dirent *dirp, size_t count)
+int sys_getdents(int fdnum, struct phabos_dirent *dirp, size_t count)
 {
-    if (fd < 0)
+    struct task *task;
+    struct fd *fd;
+
+    if (fdnum < 0)
         return -EBADF;
+
+    task = task_get_running();
+    RET_IF_FAIL(task, -1);
+
+    fd = hashtable_get(&task->fd, (void*) fdnum);
+    if (!fd)
+        return -EBADF;
+
+    RET_IF_FAIL(fd->file, -EINVAL);
+    RET_IF_FAIL(fd->file->inode, -EINVAL);
 
 //    if (count < sizeof()
 //        return -EINVAL;
 
-    printf("%s\n", __func__);
+    printf("reading directory entries: %s\n", __func__);
 
-//    getdents(fd, dirp, count);
-
-    printf("%s\n", __func__);
-
-    return 0;
+    RET_IF_FAIL(fd->file->inode, -EINVAL);
+    RET_IF_FAIL(fd->file->inode->fs, -EINVAL);
+    RET_IF_FAIL(fd->file->inode->fs->getdents, -EINVAL);
+    return fd->file->inode->fs->getdents(fd->file, dirp, count);
 }
 DEFINE_SYSCALL(SYS_GETDENTS, getdents, 3);
 

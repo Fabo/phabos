@@ -89,6 +89,7 @@ static int ramfs_mkdir(struct inode *cwd, const char *name, mode_t mode)
     inode->fs = cwd->mounted_inode ? cwd->mounted_inode->fs : cwd->fs;
     inode->flags = S_IFDIR;
     inode->inode = ramfs_inode;
+    mutex_init(&inode->dlock);
 
     hashtable_add(&cwd_inode->files, ramfs_inode->name, inode);
     printf("adding '%s' in %p, inode = '%p'\n", name, cwd, inode);
@@ -194,25 +195,17 @@ static struct inode *ramfs_lookup(struct inode *cwd, const char *name)
     return hashtable_get(&inode->files, (void*) name);
 }
 
-#if 0
-static something *ramfs_opendir(struct inode *cwd, const char *name)
+static int ramfs_getdents(struct file *file, struct phabos_dirent *dirp,
+                          size_t count)
 {
     
 }
-
-static int ramfs_get(something *dir, struct dirent *entry, struct dirent **result)
-{
-
-}
-#endif
 
 struct fs ramfs_fs = {
     .name = "ramfs",
     .mount = ramfs_mount,
     .mkdir = ramfs_mkdir,
-//    .opendir = ramfs_opendir,
-//    .readdir = ramfs_readdir,
-//    .closedir = ramfs_closedir,
+    .getdents = ramfs_getdents,
     .lookup = ramfs_lookup,
 };
 
