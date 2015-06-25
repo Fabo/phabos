@@ -10,9 +10,7 @@
 
 #include <stdint.h>
 #include <phabos/driver.h>
-#include <lib/list.h>
-
-#define DEVICE_CLASS_GPIO "gpio"
+#include <phabos/list.h>
 
 #define IRQ_TYPE_NONE           0x00000000
 #define IRQ_TYPE_EDGE_RISING    0x00000001
@@ -48,11 +46,11 @@ struct gpio_ops {
     int (*unmask_irq)(struct gpio_device *dev, unsigned int line);
     int (*clear_interrupt)(struct gpio_device *dev, unsigned int line);
 
-    unsigned int (*line_count)(struct gpio_device *dev);
+    size_t (*line_count)(struct gpio_device *dev);
 };
 
 struct gpio_device {
-    struct device_driver dev;
+    struct device dev;
     struct gpio_ops *ops;
     struct list_head list;
     void *priv;
