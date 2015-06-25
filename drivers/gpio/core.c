@@ -6,13 +6,20 @@
  */
 
 #include <phabos/gpio.h>
-#include <lib/assert.h>
-#include <lib/utils.h>
+#include <phabos/assert.h>
+#include <phabos/utils.h>
 #include <asm/spinlock.h>
 #include <errno.h>
 
 static struct list_head devices = LIST_INIT(devices);
 static struct spinlock dev_lock = SPINLOCK_INIT(dev_lock);
+
+#if 0
+struct gpio_device {
+    unsigned base;
+    size_t count;
+};
+#endif
 
 int gpio_device_register(struct gpio_device *gpio)
 {
