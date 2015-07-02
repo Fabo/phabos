@@ -38,9 +38,9 @@ struct i2c_msg {
 
 static inline void i2c_destroy(struct i2c_dev *dev)
 {
-    assert(dev);
-    assert(dev->ops);
-    assert(dev->ops->destroy);
+    RET_IF_FAIL(dev,);
+    RET_IF_FAIL(dev->ops,);
+    RET_IF_FAIL(dev->ops->destroy,);
     dev->ops->destroy(dev);
 }
 
@@ -53,9 +53,9 @@ static inline struct i2c_dev *i2c_initialize(int port)
 static inline int i2c_transfer(struct i2c_dev *dev, struct i2c_msg *msg,
                                size_t count)
 {
-    assert(dev);
-    assert(dev->ops);
-    assert(dev->ops->transfer);
+    RET_IF_FAIL(dev, -EINVAL);
+    RET_IF_FAIL(dev->ops, -EINVAL);
+    RET_IF_FAIL(dev->ops->transfer, -EINVAL);
     return dev->ops->transfer(dev, msg, count);
 }
 
