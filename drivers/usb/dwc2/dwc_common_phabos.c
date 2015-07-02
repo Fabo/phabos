@@ -35,7 +35,6 @@
 #include <time.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <assert.h>
 
 #include <asm/byteordering.h>
 #include <asm/machine.h>
@@ -48,6 +47,7 @@
 #include <phabos/utils.h>
 #include <phabos/workqueue.h>
 #include <phabos/sleep.h>
+#include <phabos/assert.h>
 #include <phabos/watchdog.h>
 
 /* OS-Level Implementations */
@@ -410,7 +410,7 @@ static void timer_callback(struct watchdog *watchdog)
     struct dwc_timer *timer =
         containerof(watchdog, struct dwc_timer, watchdog);
 
-    assert(timer->cb);
+    RET_IF_FAIL(timer->cb,);
     timer->cb(timer->data);
 
     if (timer->period)
