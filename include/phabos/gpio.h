@@ -25,41 +25,38 @@ typedef void (*gpio_irq_handler_t)(int pin);
 
 struct gpio_ops {
     int (*get_direction)(struct gpio_device *dev, unsigned int line);
-    void (*direction_in)(struct gpio_device *dev, unsigned int line);
-    void (*direction_out)(struct gpio_device *dev, unsigned int line,
-                          unsigned int value);
+    int (*direction_in)(struct gpio_device *dev, unsigned int line);
+    int (*direction_out)(struct gpio_device *dev, unsigned int line,
+                         unsigned int value);
 
-    void (*activate)(struct gpio_device *dev, unsigned int line);
-    void (*deactivate)(struct gpio_device *dev, unsigned int line);
+    int (*activate)(struct gpio_device *dev, unsigned int line);
+    int (*deactivate)(struct gpio_device *dev, unsigned int line);
 
     int (*get_value)(struct gpio_device *dev, unsigned int line);
     int (*set_value)(struct gpio_device *dev, unsigned int line,
                      unsigned int value);
-    int (*set_debounce)(struct gpio_device *dev, unsigned int line,
-                        uint16_t delay);
 
-    int (*irqattach)(struct gpio_device *dev, unsigned int line,
-                     gpio_irq_handler_t handler);
-    int (*set_triggering)(struct gpio_device *dev, unsigned int line,
-                          int trigger);
-    int (*mask_irq)(struct gpio_device *dev, unsigned int line);
-    int (*unmask_irq)(struct gpio_device *dev, unsigned int line);
-    int (*clear_interrupt)(struct gpio_device *dev, unsigned int line);
+    int (*irq_attach)(struct gpio_device *dev, unsigned int line,
+                      gpio_irq_handler_t handler);
+    int (*irq_set_triggering)(struct gpio_device *dev, unsigned int line,
+                              int trigger);
+    int (*irq_mask)(struct gpio_device *dev, unsigned int line);
+    int (*irq_unmask)(struct gpio_device *dev, unsigned int line);
+    int (*irq_clear)(struct gpio_device *dev, unsigned int line);
 
     size_t (*line_count)(struct gpio_device *dev);
 };
 
 struct gpio_device {
-    struct device dev;
+    struct device device;
     struct gpio_ops *ops;
     struct list_head list;
-    void *priv;
+
+    unsigned int base;
+    size_t count;
 };
 
 int gpio_device_register(struct gpio_device *gpio);
-int gpio_device_unregister(struct gpio_device *gpio);
-
-struct gpio_device *gpio_device_get(unsigned int id);
 
 #endif /* __GPIO_H__ */
 
