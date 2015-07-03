@@ -33,6 +33,7 @@
 
 #include <asm/irq.h>
 #include <asm/hwio.h>
+#include <asm/spinlock.h>
 #include <asm/tsb-irq.h>
 #include <phabos/gpio.h>
 #include <phabos/utils.h>
@@ -42,7 +43,6 @@
 #include <errno.h>
 
 #include "scm.h"
-#include "gpio.h"
 
 #define GPIO_BASE           0x40003000
 #define GPIO_DATA           (GPIO_BASE)
@@ -62,6 +62,12 @@
 #define GPIO_INTCTRL2       (GPIO_BASE + 0x38)
 #define GPIO_INTCTRL3       (GPIO_BASE + 0x3c)
 
+#define TSB_IRQ_TYPE_LEVEL_LOW      0x0
+#define TSB_IRQ_TYPE_LEVEL_HIGH     0x1
+#define TSB_IRQ_TYPE_EDGE_FALLING   0x2
+#define TSB_IRQ_TYPE_EDGE_RISING    0x3
+#define TSB_IRQ_TYPE_EDGE_BOTH      0x7
+
 #if defined(CONFIG_TSB_ES1)
 #define NR_GPIO_IRQS 16
 #else
@@ -72,6 +78,10 @@
 static gpio_irq_handler_t tsb_gpio_irq_vector[NR_GPIO_IRQS];
 static uint8_t tsb_gpio_irq_gpio_base[NR_GPIO_IRQS];
 static volatile uint32_t refcount;
+static struct gpio_ops tsb_gpio_ops;
+static struct spinlock tsb_gpio_lock = SPINLOCK_INIT(tsb_gpio_lock);
+
+static void tsb_gpio_irq_handler(int irq, void *data);
 
 static int tsb_gpio_get_value(struct gpio_device *dev, unsigned int line)
 {
@@ -91,16 +101,18 @@ static int tsb_gpio_get_direction(struct gpio_device *dev, unsigned int line)
     return !(dir & (1 << line));
 }
 
-static void tsb_gpio_direction_in(struct gpio_device *dev, unsigned int line)
+static int tsb_gpio_direction_in(struct gpio_device *dev, unsigned int line)
 {
     write32(GPIO_DIRIN, 1 << line);
+    return 0;
 }
 
-static void tsb_gpio_direction_out(struct gpio_device *dev, unsigned int line,
-                                   unsigned int value)
+static int tsb_gpio_direction_out(struct gpio_device *dev, unsigned int line,
+                                  unsigned int value)
 {
     tsb_gpio_set_value(dev, line, value);
     write32(GPIO_DIROUT, 1 << line);
+    return 0;
 }
 
 static size_t tsb_gpio_line_count(struct gpio_device *dev)
@@ -108,17 +120,58 @@ static size_t tsb_gpio_line_count(struct gpio_device *dev)
     return NR_GPIO_IRQS;
 }
 
-#if 0
-void tsb_gpio_activate(void *driver_data, uint8_t which)
+static void tsb_gpio_initialize(void)
 {
-    tsb_gpio_initialize();
+    spinlock_lock(&tsb_gpio_lock);
+
+    if (refcount++)
+        goto out;
+
+    tsb_clk_enable(TSB_CLK_GPIO);
+    tsb_reset(TSB_RST_GPIO);
+
+    memset(tsb_gpio_irq_vector, 0, ARRAY_SIZE(tsb_gpio_irq_vector));
+
+    /* Attach Interrupt Handler */
+    irq_attach(TSB_IRQ_GPIO, tsb_gpio_irq_handler, NULL);
+
+    /* Enable Interrupt Handler */
+    irq_enable_line(TSB_IRQ_GPIO);
+
+out:
+    spinlock_unlock(&tsb_gpio_lock);
 }
 
-void tsb_gpio_deactivate(void *driver_data, uint8_t which)
+static void tsb_gpio_uninitialize(void)
+{
+    spinlock_lock(&tsb_gpio_lock);
+
+    if (!refcount)
+        goto out;
+
+    if (--refcount)
+        goto out;
+
+    tsb_clk_disable(TSB_CLK_GPIO);
+
+    /* Detach Interrupt Handler */
+    irq_detach(TSB_IRQ_GPIO);
+
+out:
+    spinlock_unlock(&tsb_gpio_lock);
+}
+
+int tsb_gpio_activate(struct gpio_device *dev, unsigned int line)
+{
+    tsb_gpio_initialize();
+    return 0;
+}
+
+int tsb_gpio_deactivate(struct gpio_device *dev, unsigned int line)
 {
     tsb_gpio_uninitialize();
+    return 0;
 }
-#endif
 
 static int tsb_gpio_mask_irq(struct gpio_device *dev, unsigned int line)
 {
@@ -223,21 +276,15 @@ static int tsb_gpio_irqattach(struct gpio_device *dev, unsigned int line,
     return 0;
 }
 
-static void tsb_gpio_irqinitialize(void)
-{
-    memset(tsb_gpio_irq_vector, 0, ARRAY_SIZE(tsb_gpio_irq_vector));
-}
-
 static int tsb_gpio_probe(struct device *device)
 {
-    tsb_clk_enable(TSB_CLK_GPIO);
-    tsb_reset(TSB_RST_GPIO);
+    struct gpio_device *dev = containerof(device, struct gpio_device, device);
 
-    tsb_gpio_irqinitialize();
-    irq_attach(TSB_IRQ_GPIO, tsb_gpio_irq_handler, NULL);
-    irq_enable_line(TSB_IRQ_GPIO);
+    RET_IF_FAIL(device, -EINVAL);
 
-    return 0;
+    dev->ops = &tsb_gpio_ops;
+
+    return gpio_device_register(dev);
 }
 
 static int tsb_gpio_remove(struct device *device)
@@ -257,11 +304,11 @@ static struct gpio_ops tsb_gpio_ops = {
     .get_value = tsb_gpio_get_value,
     .set_value = tsb_gpio_set_value,
     .line_count = tsb_gpio_line_count,
-    .clear_interrupt = tsb_gpio_clear_interrupt,
-    .mask_irq = tsb_gpio_mask_irq,
-    .unmask_irq = tsb_gpio_unmask_irq,
-    .set_triggering = tsb_set_gpio_triggering,
-    .irqattach = tsb_gpio_irqattach,
+    .irq_clear = tsb_gpio_clear_interrupt,
+    .irq_mask = tsb_gpio_mask_irq,
+    .irq_unmask = tsb_gpio_unmask_irq,
+    .irq_set_triggering = tsb_set_gpio_triggering,
+    .irq_attach = tsb_gpio_irqattach,
 };
 
 __driver__ struct driver tsb_gpio_driver = {
