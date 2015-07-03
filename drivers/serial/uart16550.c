@@ -300,7 +300,9 @@ static int uart16550_probe(struct device *device)
     RET_IF_FAIL(!retval, retval);
 
     dev->rx_start = dev->rx_end = 0;
+    dev->tx_start = dev->tx_end = 0;
     mutex_init(&dev->rx_mutex);
+    mutex_init(&dev->tx_mutex);
     semaphore_init(&dev->rx_semaphore, 0);
     semaphore_init(&dev->tx_semaphore, 0);
 
