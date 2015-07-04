@@ -298,6 +298,8 @@ static int tsb_gpio_remove(struct device *device)
 }
 
 static struct gpio_ops tsb_gpio_ops = {
+    .activate = tsb_gpio_activate,
+    .deactivate = tsb_gpio_deactivate,
     .get_direction = tsb_gpio_get_direction,
     .direction_in = tsb_gpio_direction_in,
     .direction_out = tsb_gpio_direction_out,
