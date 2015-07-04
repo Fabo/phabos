@@ -1,9 +1,10 @@
 #include <phabos/usb/hcd.h>
+#include <phabos/utils.h>
 
 #include <errno.h>
 
 enum usb_descritor_type {
-    USB_DESCRIPTOR_HUB,
+    USB_DESCRIPTOR_HUB = 0x29,
 };
 
 enum {
@@ -101,33 +102,66 @@ struct usb_string_descriptor {
 
 static int usb_enumerate_bus(struct usb_hcd *hcd)
 {
-#if 0
     int retval;
-
     char buf[64];
     struct usb_device_descriptor *device_desc =
         (struct usb_device_descriptor*) buf;
     struct usb_hub_descriptor *hub_desc = (struct usb_hub_descriptor*) buf;
+    uint32_t status;
 
     RET_IF_FAIL(hcd, -EINVAL);
-    RET_IF_FAIL(hcd->hub_control);
+    RET_IF_FAIL(hcd->driver, -EINVAL);
+    RET_IF_FAIL(hcd->driver->start, -EINVAL);
+    RET_IF_FAIL(hcd->driver->hub_control, -EINVAL);
 
-    retval = hcd->hub_control(USB_GET_HUB_DESCRIPTOR, 0, 0, 2, device_desc);
+    retval = hcd->driver->start(hcd);
+    if (retval)
+        return retval;
+
+    retval = hcd->driver->hub_control(hcd, USB_GET_HUB_DESCRIPTOR, 0, 0, 2, buf);
     if (retval)
         return retval;
 
     if (device_desc->bDescriptorType != USB_DESCRIPTOR_HUB)
         return -EINVAL;
 
-    // do stuff with hub_desc
-#endif
+    if (device_desc->bLength > ARRAY_SIZE(buf))
+        return -ENOMEM;
+
+    retval = hcd->driver->hub_control(hcd, USB_GET_HUB_DESCRIPTOR, 0, 0, device_desc->bLength, buf);
+    if (retval)
+        return retval;
+
+    kprintf("%s: found new hub with %u ports.\n", hcd->device.name,
+                                                  hub_desc->bNbrPorts);
+
+    for (int i = 1; i <= hub_desc->bNbrPorts; i++) {
+        retval = hcd->driver->hub_control(hcd, USB_GET_PORT_STATUS, 0, i, 4, &status);
+        if (retval)
+            continue;
+
+        if (!(status & PORT_CONNECTION))
+            continue;
+
+
+        retval = hcd->driver->hub_control(hcd, USB_SET_PORT_FEATURE, PORT_POWER, i, 0, NULL);
+
+        mdelay(hub_desc->bPwrOn2PwrGood * 2);
+
+        retval = hcd->driver->hub_control(hcd, USB_SET_PORT_FEATURE, PORT_RESET, i, 0, NULL);
+
+        kprintf("Port status: %X\n", status);
+    }
 
     return 0;
 }
 
 int usb_hcd_register(struct usb_hcd *hcd)
 {
-    kprintf("%s()\n", __func__);
+    int retval = usb_enumerate_bus(hcd);
+
+    if (retval)
+        kprintf("usb: enumeration error: %d %s\n", retval, strerror(retval));
 
     return 0;
 }
