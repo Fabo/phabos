@@ -58,5 +58,22 @@ struct gpio_device {
 
 int gpio_device_register(struct gpio_device *gpio);
 
+int gpio_get_direction(unsigned int line);
+int gpio_direction_in(unsigned int line);
+int gpio_direction_out(unsigned int line,
+                       unsigned int value);
+
+int gpio_activate(unsigned int line);
+int gpio_deactivate(unsigned int line);
+
+int gpio_get_value(unsigned int line);
+int gpio_set_value(unsigned int line, unsigned int value);
+
+int gpio_irq_attach(unsigned int line, gpio_irq_handler_t handler);
+int gpio_irq_set_triggering(unsigned int line, int trigger);
+int gpio_irq_mask(unsigned int line);
+int gpio_irq_unmask(unsigned int line);
+int gpio_irq_clear(unsigned int line);
+
 #endif /* __GPIO_H__ */
 
