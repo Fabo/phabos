@@ -354,20 +354,6 @@ void get_hub_descriptor_callback(struct urb *urb)
     kprintf("%s: found new hub with %u ports.\n", hcd->device.name,
                                                   hub_desc->bNbrPorts);
 
-#if 0
-    USB_GET_STATUS          = 0,
-    USB_CLEAR_FEATURE       = 1,
-    USB_SET_FEATURE         = 3,
-    USB_SET_ADDRESS         = 5,
-    USB_GET_DESCRIPTOR      = 6,
-    USB_SET_DESCRIPTOR      = 7,
-    USB_GET_CONFIGURATION   = 8,
-    USB_SET_CONFIGURATION   = 9,
-    USB_GET_INTERFACE       = 10,
-    USB_SET_INTERFACE       = 11,
-    USB_SYNCH_FRAME         = 12,
-#endif
-
     for (int i = 1; i <= hub_desc->bNbrPorts; i++) {
 
         kprintf("Port: %d\n", i);
