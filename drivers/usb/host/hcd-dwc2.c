@@ -32,17 +32,17 @@
 #include <stdio.h>
 #include <stdint.h>
 
+#include <asm/irq.h>
 #include <phabos/driver.h>
 #include <phabos/utils.h>
 #include <phabos/usb/hcd-dwc2.h>
 
+#include "../dwc2/dwc_otg_driver.h"
+#include "../dwc2/dwc_otg_hcd_if.h"
+#include "../dwc2/dwc_otg_hcd.h"
+
 #define REG_OFFSET 0xFFFFFFFF
 
-#define TSB_SYSCTL_USBOTG_HSIC_CONTROL  (SYSCTL_BASE + 0x500)
-#define TSB_HSIC_DPPULLDOWN             (1 << 0)
-#define TSB_HSIC_DMPULLDOWN             (1 << 1)
-
-#if 0
 static dwc_otg_device_t *g_dev;
 static struct dwc_otg_hcd_function_ops hcd_fops;
 
@@ -53,13 +53,13 @@ static struct dwc_otg_hcd_function_ops hcd_fops;
  * @param context context of the preempted task
  * @return 0 if successful
  */
-static int hsic_irq_handler(int irq, void *context)
+static void hsic_irq_handler(int irq, void *data)
 {
-    DEBUGASSERT(g_dev);
-    DEBUGASSERT(g_dev->hcd);
+    RET_IF_FAIL(g_dev,);
+    RET_IF_FAIL(g_dev->hcd,);
 
     dwc_otg_handle_common_intr(g_dev);
-    return dwc_otg_hcd_handle_intr(g_dev->hcd);
+    dwc_otg_hcd_handle_intr(g_dev->hcd);
 }
 
 /**
@@ -70,9 +70,9 @@ static int hcd_init(void)
 {
     int retval;
 
-    DEBUGASSERT(g_dev);
-    DEBUGASSERT(!g_dev->hcd);
-    DEBUGASSERT(g_dev->core_if);
+    RET_IF_FAIL(g_dev, -EINVAL);
+    RET_IF_FAIL(!g_dev->hcd, -EINVAL);
+    RET_IF_FAIL(g_dev->core_if, -EINVAL);
 
     g_dev->hcd = dwc_otg_hcd_alloc_hcd();
     if (!g_dev->hcd) {
@@ -100,11 +100,12 @@ error_hcd_init:
  *
  * @return 0 if successful
  */
-static int hcd_core_init(void)
+static int hcd_core_init(struct usb_hcd *hcd)
 {
     int retval;
 
-    DEBUGASSERT(!g_dev);
+    RET_IF_FAIL(hcd, -EINVAL);
+    RET_IF_FAIL(!g_dev, -EINVAL);
 
     g_dev = zalloc(sizeof(*g_dev));
     if (!g_dev) {
@@ -112,7 +113,7 @@ static int hcd_core_init(void)
     }
 
     g_dev->os_dep.reg_offset = REG_OFFSET;
-    g_dev->os_dep.base = (void *) HSIC_BASE;
+    g_dev->os_dep.base = (void *) hcd->device.reg_base;
     g_dev->common_irq_installed = 1;
 
     g_dev->core_if = dwc_otg_cil_init(g_dev->os_dep.base);
@@ -141,8 +142,8 @@ static int hcd_core_init(void)
         dwc_otg_enable_global_interrupts(g_dev->core_if);
     }
 
-    irq_attach(TSB_IRQ_HSIC, hsic_irq_handler);
-    up_enable_irq(TSB_IRQ_HSIC);
+    irq_attach(hcd->device.irq, hsic_irq_handler, NULL);
+    irq_enable_line(hcd->device.irq);
 
     return 0;
 
@@ -156,97 +157,21 @@ error_cil_init:
     return retval;
 }
 
-/**
- * Initialize USB driver
- *
- * Clock the USB IP, put the usb hub under reset and initialize the driver
- *
- * @param dev: usb host device
- * @return 0 if successful
- */
-static int tsb_usb_hcd_open(struct device *dev)
+static void hcd_core_deinit(struct usb_hcd *hcd)
 {
-    int retval;
+    RET_IF_FAIL(hcd,);
+    RET_IF_FAIL(g_dev,);
+    RET_IF_FAIL(g_dev->hcd,);
+    RET_IF_FAIL(g_dev->core_if,);
 
-    if (!dev) {
-        return -EINVAL;
-    }
-
-    dev->private = device_open(DEVICE_TYPE_HSIC_DEVICE, 0);
-    if (!dev->private) {
-        return -EINVAL;
-    }
-
-    retval = device_hsic_hold_reset(dev->private);
-    if (retval) {
-        goto error_hsic_hold_reset;
-    }
-
-    mm_initialize(&g_usb_dma_heap, (void *)BUFRAM2_BASE, BUFRAM_BANK_SIZE);
-    mm_addregion(&g_usb_dma_heap, (void *)BUFRAM3_BASE, BUFRAM_BANK_SIZE);
-
-    putreg32(TSB_HSIC_DPPULLDOWN | TSB_HSIC_DMPULLDOWN,
-             TSB_SYSCTL_USBOTG_HSIC_CONTROL);
-
-    tsb_clk_enable(TSB_CLK_HSIC480);
-    tsb_clk_enable(TSB_CLK_HSICBUS);
-    tsb_clk_enable(TSB_CLK_HSICREF);
-
-    tsb_reset(TSB_RST_HSIC);
-    tsb_reset(TSB_RST_HSICPHY);
-    tsb_reset(TSB_RST_HSICPOR);
-
-    tsb_clr_pinshare(TSB_PIN_UART_CTSRTS);
-
-    retval = hcd_core_init();
-    if (retval) {
-        goto error_hcd_core_init;
-    }
-
-    return 0;
-
-error_hcd_core_init:
-    tsb_clk_disable(TSB_CLK_HSIC480);
-    tsb_clk_disable(TSB_CLK_HSICBUS);
-    tsb_clk_disable(TSB_CLK_HSICREF);
-
-error_hsic_hold_reset:
-    device_close(dev->private);
-
-    return retval;
-}
-
-/**
- * Uninitialize USB driver
- *
- * Clean-up everything allocated by the driver, unclock the USB IP, and put
- * the usb hub under reset.
- *
- * @param dev: usb host device
- */
-static void tsb_usb_hcd_close(struct device *dev)
-{
-    DEBUGASSERT(g_dev);
-    DEBUGASSERT(g_dev->hcd);
-    DEBUGASSERT(g_dev->core_if);
-
-    up_disable_irq(TSB_IRQ_HSIC);
-    irq_detach(TSB_IRQ_HSIC);
+    irq_disable_line(hcd->device.irq);
+    irq_detach(hcd->device.irq);
 
     dwc_otg_hcd_remove(g_dev->hcd);
     dwc_otg_cil_remove(g_dev->core_if);
 
     free(g_dev);
     g_dev = NULL;
-
-    tsb_clk_disable(TSB_CLK_HSIC480);
-    tsb_clk_disable(TSB_CLK_HSICBUS);
-    tsb_clk_disable(TSB_CLK_HSICREF);
-
-    if (dev && dev->private) {
-        device_hsic_hold_reset(dev->private);
-        device_close(dev->private);
-    }
 }
 
 /**
@@ -255,28 +180,21 @@ static void tsb_usb_hcd_close(struct device *dev)
  * @param dev: usb host device
  * @return 0 if successful
  */
-static int hcd_start(struct device *dev)
+static int hcd_start(struct usb_hcd *hcd)
 {
     int retval;
 
-    if (!dev || !dev->private) {
-        return -EINVAL;
-    }
-
-    device_hsic_release_reset(dev->private);
+    retval = hcd_core_init(hcd);
+    if (retval)
+        return retval;
 
     retval = dwc_otg_hcd_start(g_dev->hcd, &hcd_fops);
-    if (retval) {
-        goto error_hcd_start;
-    }
+    if (retval)
+        return retval;
 
-    dwc_otg_set_hsic_connect(g_dev->hcd->core_if, 1);
+    dwc_otg_set_hsic_connect(g_dev->hcd->core_if, hcd->has_hsic_phy);
 
     return 0;
-
-error_hcd_start:
-    device_hsic_hold_reset(dev->private);
-    return retval;
 }
 
 /**
@@ -284,16 +202,15 @@ error_hcd_start:
  *
  * @param dev: usb host device
  */
-static void hcd_stop(struct device *dev)
+static int hcd_stop(struct usb_hcd *hcd)
 {
-    RET_IF_FAIL(g_dev);
-    DEBUGASSERT(g_dev->hcd);
+    RET_IF_FAIL(g_dev, -EINVAL);
+    RET_IF_FAIL(g_dev->hcd, -EINVAL);
 
     dwc_otg_hcd_stop(g_dev->hcd);
 
-    if (dev && dev->private) {
-        device_hsic_hold_reset(dev->private);
-    }
+    hcd_core_deinit(hcd);
+    return 0;
 }
 
 /**
@@ -306,43 +223,29 @@ static void hcd_stop(struct device *dev)
  * @see USB Specification for the meaning of typeReq, wValue, wIndex, and
  * wLength
  */
-static int hub_control(struct device *dev, uint16_t typeReq, uint16_t wValue,
-                       uint16_t wIndex, char *buf, uint16_t wLength)
+static int hub_control(struct usb_hcd *dev, uint16_t typeReq, uint16_t wValue,
+                       uint16_t wIndex, uint16_t wLength, char *buf)
 {
-    DEBUGASSERT(g_dev);
-    DEBUGASSERT(g_dev->hcd);
+    RET_IF_FAIL(g_dev, -EINVAL);
+    RET_IF_FAIL(g_dev->hcd, -EINVAL);
 
     return dwc_otg_hcd_hub_control(g_dev->hcd, typeReq, wValue, wIndex,
                                    (uint8_t*) buf, wLength);
 }
 
-static struct device_usb_hcd_type_ops tsb_usb_hcd_type_ops = {
+static struct usb_hc_driver dwc2_hcd_driver = {
     .start = hcd_start,
     .stop = hcd_stop,
     .hub_control = hub_control,
 };
 
-static struct device_driver_ops tsb_usb_hcd_driver_ops = {
-    .open = tsb_usb_hcd_open,
-    .close = tsb_usb_hcd_close,
-    .type_ops.usb_hcd = &tsb_usb_hcd_type_ops,
-};
-
-struct device_driver tsb_usb_hcd_driver = {
-    .type = DEVICE_TYPE_USB_HCD,
-    .name = "dw_usb2_hcd",
-    .desc = "DWC2 USB 2.0 Host Controller Driver",
-    .ops = &tsb_usb_hcd_driver_ops,
-};
-
-#endif
-
 static int dwc2_probe(struct device *device)
 {
-    struct dwc2_hcd *dev = containerof(device, struct dwc2_hcd, device);
+    struct usb_hcd *hcd = containerof(device, struct usb_hcd, device);
 
-    usb_hcd_register(&dev->hcd);
-    return 0;
+    hcd->driver = &dwc2_hcd_driver;
+
+    return usb_hcd_register(&hcd);
 }
 
 static int dwc2_remove(struct device *device)
