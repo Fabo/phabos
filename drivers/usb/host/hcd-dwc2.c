@@ -243,9 +243,12 @@ static int dwc2_probe(struct device *device)
 {
     struct usb_hcd *hcd = containerof(device, struct usb_hcd, device);
 
+    if (device->power_on)
+        device->power_on(device);
+
     hcd->driver = &dwc2_hcd_driver;
 
-    return usb_hcd_register(&hcd);
+    return usb_hcd_register(hcd);
 }
 
 static int dwc2_remove(struct device *device)
