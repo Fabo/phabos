@@ -17,12 +17,9 @@ static unsigned int next_base;
 
 int gpio_device_register(struct gpio_device *gpio)
 {
-    int retval;
-
     RET_IF_FAIL(gpio, -EINVAL);
 
-    retval = device_register(&gpio->device);
-    RET_IF_FAIL(!retval, retval);
+    list_init(&gpio->list);
 
     spinlock_lock(&dev_lock);
     gpio->base = next_base;
