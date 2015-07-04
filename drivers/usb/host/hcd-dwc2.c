@@ -35,6 +35,7 @@
 #include <asm/irq.h>
 #include <phabos/driver.h>
 #include <phabos/utils.h>
+#include <phabos/usb.h>
 #include <phabos/usb/hcd-dwc2.h>
 
 #include "../dwc2/dwc_otg_driver.h"
@@ -44,7 +45,71 @@
 #define REG_OFFSET 0xFFFFFFFF
 
 static dwc_otg_device_t *g_dev;
-static struct dwc_otg_hcd_function_ops hcd_fops;
+
+static int _hub_info(dwc_otg_hcd_t *hcd, void *urb_handle, uint32_t *hub_addr,
+                     uint32_t *port_addr)
+{
+    struct urb *urb = urb_handle;
+
+    if (!urb) {
+        return -EINVAL;
+    }
+
+    if (hub_addr) {
+        *hub_addr = urb->devnum;
+    }
+
+    if (port_addr) {
+        *port_addr = urb->dev_ttport;
+    }
+
+    return 0;
+}
+
+
+static int _speed(dwc_otg_hcd_t *hcd, void *urb_handle)
+{
+    struct urb *urb = urb_handle;
+
+    if (!urb) {
+        return -EINVAL;
+    }
+
+    return urb->dev_speed;
+}
+
+static int _complete(dwc_otg_hcd_t *hcd, void *urb_handle,
+             dwc_otg_hcd_urb_t *dwc_urb, int32_t status)
+{
+    struct urb *urb = urb_handle;
+
+    if (!hcd || !urb || !dwc_urb) {
+        return -EINVAL;
+    }
+
+    urb->actual_length = dwc_otg_hcd_urb_get_actual_length(dwc_urb);
+    urb->status = status;
+
+    free(dwc_urb);
+
+    DWC_SPINUNLOCK(hcd->lock);
+
+    if (urb->complete) {
+        urb->complete(urb);
+    } else {
+        free(urb); // FIXME unref
+    }
+
+    DWC_SPINLOCK(hcd->lock);
+
+    return 0;
+}
+
+static struct dwc_otg_hcd_function_ops hcd_fops = {
+    .hub_info = _hub_info,
+    .speed = _speed,
+    .complete = _complete,
+};
 
 /**
  * HSIC IRQ Handler
@@ -57,6 +122,8 @@ static void hsic_irq_handler(int irq, void *data)
 {
     RET_IF_FAIL(g_dev,);
     RET_IF_FAIL(g_dev->hcd,);
+
+    kprintf("Z");
 
     dwc_otg_handle_common_intr(g_dev);
     dwc_otg_hcd_handle_intr(g_dev->hcd);
@@ -213,6 +280,66 @@ static int hcd_stop(struct usb_hcd *hcd)
     return 0;
 }
 
+static int urb_enqueue(struct usb_hcd *hcd, struct urb *urb)
+{
+    int retval;
+    uint8_t ep_type;
+    int number_of_packets = 0;
+    dwc_otg_hcd_urb_t *dwc_urb;
+
+    switch (usb_host_pipetype(urb->pipe)) {
+    case USB_HOST_PIPE_CONTROL:
+        ep_type = USB_HOST_ENDPOINT_XFER_CONTROL;
+        break;
+
+    case USB_HOST_PIPE_ISOCHRONOUS:
+        ep_type = USB_HOST_ENDPOINT_XFER_ISOC;
+        break;
+
+    case USB_HOST_PIPE_BULK:
+        ep_type = USB_HOST_ENDPOINT_XFER_BULK;
+        break;
+
+    case USB_HOST_PIPE_INTERRUPT:
+        ep_type = USB_HOST_ENDPOINT_XFER_INT;
+        break;
+
+    default:
+        return -EINVAL;
+    }
+
+    dwc_urb = dwc_otg_hcd_urb_alloc(g_dev->hcd, number_of_packets, 0);
+    if (!dwc_urb) {
+        return -ENOMEM;
+    }
+
+    urb->hcpriv = dwc_urb;
+
+    dwc_otg_hcd_urb_set_pipeinfo(dwc_urb,
+                                 usb_host_pipedevice(urb->pipe),
+                                 usb_host_pipeendpoint(urb->pipe), ep_type,
+                                 usb_host_pipein(urb->pipe),
+                                 urb->maxpacket);
+
+    dwc_otg_hcd_urb_set_params(dwc_urb, urb, urb->buffer,
+                               (dwc_dma_t) urb->buffer, urb->length,
+                               &urb->setup_packet,
+                               (dwc_dma_t) &urb->setup_packet,
+                               urb->flags, urb->interval);
+
+    retval = dwc_otg_hcd_urb_enqueue(g_dev->hcd, dwc_urb, &urb->hcpriv_ep, 0);
+    if (retval) {
+        goto error_enqueue;
+    }
+
+    return 0;
+
+error_enqueue:
+    free(dwc_urb);
+
+    return retval;
+}
+
 /**
  * Send request to the root hub
  *
@@ -236,6 +363,7 @@ static int hub_control(struct usb_hcd *dev, uint16_t typeReq, uint16_t wValue,
 static struct usb_hc_driver dwc2_hcd_driver = {
     .start = hcd_start,
     .stop = hcd_stop,
+    .urb_enqueue = urb_enqueue,
     .hub_control = hub_control,
 };
 

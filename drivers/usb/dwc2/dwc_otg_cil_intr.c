@@ -47,7 +47,7 @@
 #include "dwc_otg_hcd.h"
 
 #ifdef DEBUG
-inline const char *op_state_str(dwc_otg_core_if_t * core_if)
+static inline const char *op_state_str(dwc_otg_core_if_t * core_if)
 {
 	return (core_if->op_state == A_HOST ? "a_host" :
 		(core_if->op_state == A_SUSPEND ? "a_suspend" :
