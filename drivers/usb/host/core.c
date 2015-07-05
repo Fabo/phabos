@@ -168,7 +168,7 @@ static void set_configuration_callback(struct urb *urb)
 }
 
 static int usb_get_descriptor(struct usb_hcd *hcd, int type, int speed,
-                              int devnum, int ttport)
+                              int devnum, int ttport, int hub_devnum)
 {
     struct urb *urb = urb_create();
     if (!urb)
@@ -179,7 +179,7 @@ static int usb_get_descriptor(struct usb_hcd *hcd, int type, int speed,
     urb->complete = get_descriptor_callback;
     urb->pipe = (USB_HOST_PIPE_CONTROL << 30) | (devnum << 8) | USB_HOST_DIR_IN;
     urb->dev_speed = speed;
-    urb->devnum = devnum;
+    urb->devnum = hub_devnum;
     urb->dev_ttport = ttport;
     urb->length = 64;
     urb->maxpacket = 0x40;
@@ -339,7 +339,7 @@ static struct urb* usb_hub_control(struct usb_hcd *hcd, int devnum, int speed,
     static int usb_get_hub_descriptor(struct usb_hcd *hcd, int type, int speed,
                                 int devnum, int ttport);
 
-static int usb_enumerate_device(struct usb_hcd *hcd, int speed);
+static int usb_enumerate_device(struct usb_hcd *hcd, int speed, int devnum);
 
 void get_hub_descriptor_callback(struct urb *urb)
 {
@@ -369,6 +369,9 @@ void get_hub_descriptor_callback(struct urb *urb)
         if (!(status & (1 << PORT_CONNECTION)))
             continue;
 
+        if (i == 4)
+            break;
+
         usb_hub_control(hcd, urb->devnum, urb->dev_speed, 0, USB_SET_PORT_FEATURE, PORT_RESET, i, 0, NULL);
 
         mdelay(1000);
@@ -384,7 +387,7 @@ void get_hub_descriptor_callback(struct urb *urb)
         if (status & (1 << 10))
             speed = USB_SPEED_HIGH;
 
-        usb_enumerate_device(hcd, speed);
+        usb_enumerate_device(hcd, speed, urb->devnum);
     }
 
     kprintf("Yop\n");
@@ -430,7 +433,7 @@ static int usb_enumerate_hub(struct usb_hcd *hcd, int devnum, int speed)
     return 0;
 }
 
-static int usb_enumerate_device(struct usb_hcd *hcd, int speed)
+static int usb_enumerate_device(struct usb_hcd *hcd, int speed, int hub_devnum)
 {
     int devnum = atomic_inc(&dev_id);
     int ttport = 0;
@@ -440,7 +443,7 @@ static int usb_enumerate_device(struct usb_hcd *hcd, int speed)
 
     kprintf("new device: %d\n", devnum);
 
-    usb_get_descriptor(hcd, USB_DESCRIPTOR_DEVICE, speed, 0, ttport);
+    usb_get_descriptor(hcd, USB_DESCRIPTOR_DEVICE, speed, 0, ttport, hub_devnum);
     usb_set_address(hcd, devnum, speed, ttport);
     usb_set_configuration(hcd, 1, devnum, speed, ttport);
 //    usb_get_descriptor(hcd, USB_DESCRIPTOR_DEVICE, speed, devnum, ttport);
@@ -514,7 +517,7 @@ static int usb_enumerate_bus(struct usb_hcd *hcd)
         retval = hcd->driver->hub_control(hcd, USB_GET_PORT_STATUS, 0, i, 4, (char*) &status);
         kprintf("Port status: %X\n", status);
 
-        usb_enumerate_device(hcd, USB_SPEED_HIGH);
+        usb_enumerate_device(hcd, USB_SPEED_HIGH, 0);
     }
 
     return 0;

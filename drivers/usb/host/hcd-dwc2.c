@@ -63,14 +63,6 @@ static int _hub_info(dwc_otg_hcd_t *hcd, void *urb_handle, uint32_t *hub_addr,
         *port_addr = urb->dev_ttport;
     }
 
-    if (urb->dev_speed == 2) {
-        kprintf("full speed device\n");
-        *hub_addr = 2;
-        *port_addr = 3;
-    } else {
-        kprintf("high speed device\n");
-    }
-
     return 0;
 }
 
@@ -82,8 +74,6 @@ static int _speed(dwc_otg_hcd_t *hcd, void *urb_handle)
     if (!urb) {
         return -EINVAL;
     }
-
-    kprintf("speed: %d\n", urb->dev_speed);
 
     return urb->dev_speed;
 }
