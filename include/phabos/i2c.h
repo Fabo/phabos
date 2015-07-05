@@ -10,9 +10,10 @@
 
 #define I2C_READ    (1 << 1)
 
-#include <assert.h>
 #include <stdint.h>
 #include <stddef.h>
+
+#include <phabos/assert.h>
 
 struct i2c_dev;
 struct i2c_msg;
