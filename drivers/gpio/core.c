@@ -49,6 +49,11 @@ struct gpio_device *gpio_get_device(unsigned int line)
     return device;
 }
 
+size_t gpio_line_count(void)
+{
+    return next_base;
+}
+
 int gpio_get_direction(unsigned int line)
 {
     struct gpio_device *device = gpio_get_device(line);
@@ -145,6 +150,20 @@ int gpio_set_value(unsigned int line, unsigned int value)
         return -ENOSYS;
 
     return device->ops->set_value(device, line - device->base, value);
+}
+
+int gpio_set_debounce(unsigned int line, unsigned int usec)
+{
+    struct gpio_device *device = gpio_get_device(line);
+    if (!device)
+        return -ENODEV;
+
+    RET_IF_FAIL(device->ops, -EINVAL);
+
+    if (!device->ops->set_debounce)
+        return -ENOSYS;
+
+    return device->ops->set_debounce(device, line - device->base, usec);
 }
 
 int gpio_irq_attach(unsigned int line, gpio_irq_handler_t handler)

@@ -36,6 +36,9 @@ struct gpio_ops {
     int (*set_value)(struct gpio_device *dev, unsigned int line,
                      unsigned int value);
 
+    int (*set_debounce)(struct gpio_device *dev, unsigned int line,
+                        unsigned int usec);
+
     int (*irq_attach)(struct gpio_device *dev, unsigned int line,
                       gpio_irq_handler_t handler);
     int (*irq_set_triggering)(struct gpio_device *dev, unsigned int line,
@@ -57,6 +60,7 @@ struct gpio_device {
 };
 
 int gpio_device_register(struct gpio_device *gpio);
+size_t gpio_line_count(void);
 
 int gpio_get_direction(unsigned int line);
 int gpio_direction_in(unsigned int line);
@@ -68,6 +72,8 @@ int gpio_deactivate(unsigned int line);
 
 int gpio_get_value(unsigned int line);
 int gpio_set_value(unsigned int line, unsigned int value);
+
+int gpio_set_debounce(unsigned int line, unsigned int usec);
 
 int gpio_irq_attach(unsigned int line, gpio_irq_handler_t handler);
 int gpio_irq_set_triggering(unsigned int line, int trigger);
