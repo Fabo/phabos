@@ -22,5 +22,7 @@ struct usb_hc_driver {
                        uint16_t wIndex, uint16_t wLength, char *buf);
 };
 
+int usb_hcd_register(struct usb_hcd *hcd);
+
 #endif /* __USB_HCD_H__ */
 
