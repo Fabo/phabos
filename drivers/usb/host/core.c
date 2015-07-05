@@ -1,6 +1,7 @@
 #include <asm/delay.h>
 #include <phabos/usb/hcd.h>
 #include <phabos/utils.h>
+#include <phabos/scheduler.h>
 
 #include <errno.h>
 #include <string.h>
@@ -146,15 +147,6 @@ static void get_descriptor_callback(struct urb *urb)
     kprintf("\tproduct index: %u\n", desc->iProduct);
     kprintf("\tserial number index: %u\n", desc->iSerialNumber);
     kprintf("\t# configuration: %u\n", desc->bNumConfigurations);
-
-    if (desc->iProduct) {
-        kprintf("Product: \n");
-        return;
-        struct urb *urb2 = usb_get_string_descriptor(urb->hcd, urb->devnum,
-                                                    urb->dev_speed,
-                                                    urb->dev_ttport,
-                                                    desc->iProduct);
-    }
 }
 
 static void set_address_callback(struct urb *urb)
@@ -275,7 +267,7 @@ static struct urb* usb_get_string_descriptor(struct usb_hcd *hcd, int devnum,
 {
     struct urb *urb = urb_create();
     if (!urb)
-        return -ENOMEM;
+        return NULL;
 
     urb->hcd = hcd;
     urb->buffer = malloc(64);
@@ -296,7 +288,7 @@ static struct urb* usb_get_string_descriptor(struct usb_hcd *hcd, int devnum,
     urb->setup_packet[6] = 64;
     urb->setup_packet[7] = 0;
 
-    int retval = urb_enqueue_sync(hcd, urb);
+    urb_enqueue_sync(hcd, urb);
     return urb;
 }
 
@@ -306,7 +298,7 @@ static struct urb* usb_hub_control(struct usb_hcd *hcd, int devnum, int speed,
 {
     struct urb *urb = urb_create();
     if (!urb)
-        return -ENOMEM;
+        return NULL;
 
     int pipedir = USB_HOST_DIR_OUT;
     if (wLength)
@@ -332,7 +324,7 @@ static struct urb* usb_hub_control(struct usb_hcd *hcd, int devnum, int speed,
     urb->setup_packet[6] = wLength & 0xff;
     urb->setup_packet[7] = wLength >> 8;
 
-    int retval = urb_enqueue_sync(hcd, urb);
+    urb_enqueue_sync(hcd, urb);
     return urb;
 }
 
@@ -346,7 +338,6 @@ void get_hub_descriptor_callback(struct urb *urb)
     struct usb_hcd *hcd = urb->hcd;
     struct usb_hub_descriptor *hub_desc = urb->buffer;
     uint32_t status;
-    int retval;
 
     if (urb->status)
         return;
@@ -393,7 +384,7 @@ void get_hub_descriptor_callback(struct urb *urb)
     kprintf("Yop\n");
 }
 
-static int usb_get_hub_descriptor(struct usb_hcd *hcd, int type, int speed,
+__attribute__((unused)) static int usb_get_hub_descriptor(struct usb_hcd *hcd, int type, int speed,
                               int devnum, int ttport)
 {
     struct urb *urb = urb_create();
@@ -427,7 +418,7 @@ static int usb_enumerate_hub(struct usb_hcd *hcd, int devnum, int speed)
     struct urb *urb;
     //usb_get_hub_descriptor(hcd, 0, speed, 2, 0);
     char buf[64];
-    urb = usb_hub_control(hcd, devnum, speed, 0, USB_GET_HUB_DESCRIPTOR, 0, 0, 0x40, &buf);
+    urb = usb_hub_control(hcd, devnum, speed, 0, USB_GET_HUB_DESCRIPTOR, 0, 0, 0x40, (uint32_t*) &buf);
     get_hub_descriptor_callback(urb);
 
     return 0;
